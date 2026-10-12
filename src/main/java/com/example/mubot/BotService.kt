@@ -193,6 +193,7 @@ class BotService : AccessibilityService() {
         lastShot = System.currentTimeMillis()
         val latch = CountDownLatch(1)
         var result: Bitmap? = null
+        try {
         takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
             override fun onSuccess(screenshot: ScreenshotResult) {
                 try {
@@ -209,9 +210,14 @@ class BotService : AccessibilityService() {
             }
 
             override fun onFailure(errorCode: Int) {
+                say("Ekran goruntusu alinamadi (kod " + errorCode + ")")
                 latch.countDown()
             }
         })
+        } catch (e: Exception) {
+            say("Ekran goruntusu hatasi: " + e.message)
+            return null
+        }
         latch.await(3, TimeUnit.SECONDS)
         return result
     }
@@ -540,6 +546,22 @@ class BotService : AccessibilityService() {
 
     // ------------------------------------------------------------------ test
 
+    /** Sadece minimap noktasina bir kez dokunur ve oyunun dokunusu kabul edip etmedigini yazar. */
+    private fun tapTest() {
+        refreshScreen()
+        val p = pt("minimap")
+        say(
+            "Tik testi: minimap (" + String.format("%.3f", p.first) + ", " +
+                String.format("%.3f", p.second) + ") ekran " + screenW + "x" + screenH
+        )
+        Thread {
+            val s0 = sent
+            val c0 = cancelled
+            tapPoint("minimap")
+            say("Tik sonucu: kabul " + (sent - s0) + " / iptal " + (cancelled - c0))
+        }.start()
+    }
+
     private fun runTest() {
         say("Test: ekran okunuyor")
         Thread {
@@ -626,6 +648,7 @@ class BotService : AccessibilityService() {
         walkBtn = wb
         addBtn(col, wb)
 
+        addBtn(col, mkBtn("Tik testi") { tapTest() })
         addBtn(col, mkBtn("Test") { runTest() })
         addBtn(col, mkBtn("Ayar") { toggleMenu() })
 
