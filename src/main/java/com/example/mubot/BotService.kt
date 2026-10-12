@@ -46,10 +46,12 @@ class BotService : AccessibilityService() {
         const val LOAD_SEC = 5           // kanal degisince yukleme bekleme
         const val RECHECK_SEC = 8        // savas sirasinda boss durumunu kontrol araligi
         const val FIGHT_TIMEOUT_SEC = 600
+        const val ROW_STEP = 0.0397f     // Raklion 1/2/3 satirlari arasi dikey mesafe
+        const val SWAMP_GAP = 0.0476f    // Raklion 3 ile alttaki kirmizi Lv satiri arasi mesafe
 
         val NAMES = listOf(
             "minimap", "wire", "ch1", "ch2", "ch3", "switchLine", "closeChannel", "closeMap",
-            "map1", "map2", "map3", "boss1", "boss2", "boss3", "manual"
+            "map1", "boss1", "boss2", "boss3", "manual"
         )
 
         val LABELS = mapOf(
@@ -61,9 +63,7 @@ class BotService : AccessibilityService() {
             "switchLine" to "Switch Line butonu",
             "closeChannel" to "Kanal ekrani X (kapat) dugmesi",
             "closeMap" to "Harita ekrani X (kapat) dugmesi",
-            "map1" to "Harita listesinde Raklion 1",
-            "map2" to "Harita listesinde Raklion 2",
-            "map3" to "Harita listesinde Raklion 3",
+            "map1" to "Harita listesinde Raklion satiri (sadece sag-sol konumu kullanilir)",
             "boss1" to "Raklion 1 haritasinda Ghost Aragog ISMI",
             "boss2" to "Raklion 2 haritasinda Ghost Aragog ISMI",
             "boss3" to "Raklion 3 haritasinda Ghost Aragog ISMI",
@@ -81,8 +81,6 @@ class BotService : AccessibilityService() {
             "closeChannel" to Pair(0.637f, 0.202f),
             "closeMap" to Pair(0.894f, 0.157f),
             "map1" to Pair(0.222f, 0.390f),
-            "map2" to Pair(0.222f, 0.430f),
-            "map3" to Pair(0.222f, 0.470f),
             "boss1" to Pair(0.469f, 0.494f),
             "boss2" to Pair(0.469f, 0.494f),
             "boss3" to Pair(0.469f, 0.494f),
@@ -112,6 +110,7 @@ class BotService : AccessibilityService() {
     private var sent = 0
     private var cancelled = 0
     private var lastShot = 0L
+    private val listYs = FloatArray(4)
     private var screenW = 1
     private var screenH = 1
 
@@ -254,13 +253,6 @@ class BotService : AccessibilityService() {
         return r > 200 && g in 110..210 && b < 90
     }
 
-    private fun isSelected(c: Int): Boolean {
-        val r = Color.red(c)
-        val g = Color.green(c)
-        val b = Color.blue(c)
-        return r in 150..235 && g in 85..165 && b < 100 && (r - g) > 40
-    }
-
     private fun redFrac(b: Bitmap, m: Int): Float =
         frac(b, "boss" + m, 0.035f, 0.012f) { c -> isRed(c) }
 
@@ -269,21 +261,92 @@ class BotService : AccessibilityService() {
     private fun orangeAt(b: Bitmap, name: String): Boolean =
         frac(b, name, 0.012f, 0.020f) { c -> isOrange(c) } >= 0.12f
 
-    private fun listLayoutOk(b: Bitmap): Boolean {
-        for (m in 1..3) {
-            if (frac(b, "map" + m, 0.05f, 0.008f) { c -> isSelected(c) } >= 0.4f) return true
+    /**
+     * Sol haritalar listesinde Raklion'un hemen altindaki "Swamp of Peace" satirinin
+     * KIRMIZI Lv yazisini bulur (oyuncunun seviyesi yetmedigi icin kirmizi). Satirin dikey
+     * konumunu (ekran orani) dondurur, bulamazsa null.
+     */
+    private fun findSwampY(b: Bitmap): Float? {
+        val x0 = (0.255f * b.width).toInt()
+        val x1 = minOf(b.width - 1, (0.292f * b.width).toInt())
+        val y0 = (0.20f * b.height).toInt()
+        val y1 = minOf(b.height - 1, (0.70f * b.height).toInt())
+        var runStart = -1
+        var lastHit = -1
+        var y = y0
+        while (y <= y1) {
+            var cnt = 0
+            var x = x0
+            while (x <= x1) {
+                if (isRed(b.getPixel(x, y))) cnt++
+                x++
+            }
+            if (cnt >= 3) {
+                if (runStart < 0) runStart = y
+                lastHit = y
+            } else if (runStart >= 0 && y - lastHit > 6) {
+                break
+            }
+            y++
         }
-        return false
+        if (runStart < 0 || lastHit - runStart < 8) return null
+        return ((runStart + lastHit) / 2f) / b.height
+    }
+
+    /** Listeyi parmakla surukler. delta: icerigin ekran yuksekligine gore kayma miktari (eksi = yukari). */
+    private fun dragList(delta: Float) {
+        refreshScreen()
+        val x = pt("map1").first * screenW
+        val y0 = (0.45f - delta / 2f) * screenH
+        val y1 = (0.45f + delta / 2f) * screenH
+        val p = Path()
+        p.moveTo(x, y0)
+        p.lineTo(x, y1)
+        runGesture(p, 900L)
+    }
+
+    /** Haritada Raklion 1/2/3 satirlari gorunene kadar listeyi kaydirir ve satir konumlarini hesaplar. */
+    private fun prepareList() {
+        say("Harita listesi kaydiriliyor")
+        for (i in 0 until 14) {
+            val b = grab()
+            if (b == null) continue
+            val a = findSwampY(b)
+            if (a == null) {
+                dragList(if (i < 7) -0.22f else 0.22f)
+                pause(1000)
+                continue
+            }
+            if (a < 0.36f || a > 0.64f) {
+                dragList((0.50f - a).coerceIn(-0.25f, 0.25f))
+                pause(1000)
+                continue
+            }
+            val r3 = a - SWAMP_GAP
+            listYs[3] = r3
+            listYs[2] = r3 - ROW_STEP
+            listYs[1] = r3 - 2 * ROW_STEP
+            return
+        }
+        fail("Harita listesinde Raklion bulunamadi (liste kaydirilamadi)")
+    }
+
+    private fun tapMapRow(m: Int) {
+        tapFrac(pt("map1").first, listYs[m])
     }
 
     // ------------------------------------------------------------------ dokunma
 
     private fun tapPx(x: Float, y: Float): Boolean {
+        val p = Path()
+        p.moveTo(x, y)
+        return runGesture(p, 70L)
+    }
+
+    private fun runGesture(p: Path, dur: Long): Boolean {
         for (i in 0 until 3) {
-            val p = Path()
-            p.moveTo(x, y)
             val g = GestureDescription.Builder()
-                .addStroke(GestureDescription.StrokeDescription(p, 0, 70))
+                .addStroke(GestureDescription.StrokeDescription(p, 0, dur))
                 .build()
             val latch = CountDownLatch(1)
             var ok = false
@@ -326,13 +389,21 @@ class BotService : AccessibilityService() {
     }
 
     private fun openMap() {
+        var ok = false
         for (i in 0 until 3) {
-            if (mapOpen()) return
+            if (mapOpen()) {
+                ok = true
+                break
+            }
             tapPoint("minimap")
             pause(1500)
-            if (mapOpen()) return
+            if (mapOpen()) {
+                ok = true
+                break
+            }
         }
-        fail("Harita acilamadi. 'Ayar' ile minimap ve closeMap noktalarini kontrol et.")
+        if (!ok) fail("Harita acilamadi. 'Ayar' ile minimap ve closeMap noktalarini kontrol et.")
+        prepareList()
     }
 
     private fun closeMapIfOpen() {
@@ -364,12 +435,8 @@ class BotService : AccessibilityService() {
     private fun scanLine(line: Int): Int {
         say("Kanal " + line + " taraniyor")
         openMap()
-        val first = grab() ?: fail("Ekran goruntusu alinamadi")
-        if (!listLayoutOk(first)) {
-            fail("Harita listesi beklenen yerde degil (Raklion secili degil). Raklion'a girip tekrar basla.")
-        }
         for (m in 1..3) {
-            tapPoint("map" + m)
+            tapMapRow(m)
             pause(1200)
             val b = grab() ?: continue
             if (bossAlive(b, m)) {
@@ -397,7 +464,7 @@ class BotService : AccessibilityService() {
         while (running) {
             pause(RECHECK_SEC * 1000)
             openMap()
-            tapPoint("map" + m)
+            tapMapRow(m)
             pause(1200)
             val b = grab()
             val alive = b != null && bossAlive(b, m)
