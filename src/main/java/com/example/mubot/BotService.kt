@@ -6,6 +6,7 @@ import android.accessibilityservice.AccessibilityService.ScreenshotResult
 import android.accessibilityservice.AccessibilityService.TakeScreenshotCallback
 import android.accessibilityservice.GestureDescription
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Path
@@ -26,6 +27,7 @@ import android.widget.TextView
 import android.widget.Toast
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import rikka.shizuku.Shizuku
 
 /**
  * MU Immortal - Raklion boss kontrol botu.
@@ -305,6 +307,12 @@ class BotService : AccessibilityService() {
         val x = pt("map1").first * screenW
         val y0 = (0.45f - delta / 2f) * screenH
         val y1 = (0.45f + delta / 2f) * screenH
+        val xi = x.toInt().toString()
+        if (shizukuReady() &&
+            shell(arrayOf("input", "swipe", xi, y0.toInt().toString(), xi, y1.toInt().toString(), "900"))
+        ) {
+            return
+        }
         val p = Path()
         p.moveTo(x, y0)
         p.lineTo(x, y1)
@@ -344,9 +352,57 @@ class BotService : AccessibilityService() {
     // ------------------------------------------------------------------ dokunma
 
     private fun tapPx(x: Float, y: Float): Boolean {
+        if (shizukuReady() && shell(arrayOf("input", "tap", x.toInt().toString(), y.toInt().toString()))) {
+            sent++
+            return true
+        }
         val p = Path()
         p.moveTo(x, y)
         return runGesture(p, 70L)
+    }
+
+    // ------------------------------------------------------------------ Shizuku (yedek dokunma yontemi)
+
+    private fun shizukuReady(): Boolean {
+        return try {
+            Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+        } catch (e: Throwable) {
+            false
+        }
+    }
+
+    private fun shizukuAsk() {
+        try {
+            if (!Shizuku.pingBinder()) {
+                say("Shizuku calismiyor. Shizuku uygulamasini ac ve 'Baslat'a bas.")
+                return
+            }
+            if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
+                say("Shizuku izni tamam, dokunmalar Shizuku ile yapilacak")
+                return
+            }
+            Shizuku.requestPermission(1001)
+            say("Shizuku izin penceresinde 'Izin ver'e bas")
+        } catch (e: Throwable) {
+            say("Shizuku hatasi: " + e.message)
+        }
+    }
+
+    /** Shizuku uzerinden kabuk komutu calistirir (ornek: input tap x y). */
+    private fun shell(args: Array<String>): Boolean {
+        return try {
+            val m = Shizuku::class.java.getDeclaredMethod(
+                "newProcess",
+                Array<String>::class.java,
+                Array<String>::class.java,
+                String::class.java
+            )
+            m.isAccessible = true
+            val proc = m.invoke(null, args, null, null) as Process
+            proc.waitFor() == 0
+        } catch (e: Throwable) {
+            false
+        }
     }
 
     private fun runGesture(p: Path, dur: Long): Boolean {
@@ -558,7 +614,10 @@ class BotService : AccessibilityService() {
             val s0 = sent
             val c0 = cancelled
             tapPoint("minimap")
-            say("Tik sonucu: kabul " + (sent - s0) + " / iptal " + (cancelled - c0))
+            say(
+                "Tik sonucu: kabul " + (sent - s0) + " / iptal " + (cancelled - c0) +
+                    "  mod: " + (if (shizukuReady()) "Shizuku" else "Erisilebilirlik")
+            )
         }.start()
     }
 
@@ -648,6 +707,7 @@ class BotService : AccessibilityService() {
         walkBtn = wb
         addBtn(col, wb)
 
+        addBtn(col, mkBtn("Shizuku izni") { shizukuAsk() })
         addBtn(col, mkBtn("Tik testi") { tapTest() })
         addBtn(col, mkBtn("Test") { runTest() })
         addBtn(col, mkBtn("Ayar") { toggleMenu() })
