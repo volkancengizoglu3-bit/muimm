@@ -535,6 +535,28 @@ class BotService : AccessibilityService() {
         return alive
     }
 
+    private fun isGreen(c: Int): Boolean {
+        val r = Color.red(c); val g = Color.green(c); val b = Color.blue(c)
+        return r < 120 && g > 170 && b < 120 && g - r > 80
+    }
+
+    private fun cursorAtBoss(b: Bitmap, m: Int): Boolean {
+        val p = pt("boss" + m)
+        val cx = p.first * b.width
+        val cy = (p.second + ICON_DY) * b.height
+        val x0 = maxOf(0, (cx - 0.015f * b.width).toInt())
+        val x1 = minOf(b.width - 1, (cx + 0.015f * b.width).toInt())
+        val y0 = maxOf(0, (cy - 0.020f * b.height).toInt())
+        val y1 = minOf(b.height - 1, (cy + 0.020f * b.height).toInt())
+        var green = 0
+        var total = 0
+        for (y in y0..y1 step 2) for (x in x0..x1 step 2) {
+            total++
+            if (isGreen(b.getPixel(x, y))) green++
+        }
+        return total > 0 && green.toFloat() / total >= 0.003f
+    }
+
     private fun miniBossAlive(b: Bitmap): Boolean {
         val a = pt("miniTL"); val c = pt("miniBR")
         val x0 = maxOf(0, (a.first * b.width).toInt()); val x1 = minOf(b.width - 1, (c.first * b.width).toInt())
@@ -551,16 +573,27 @@ class BotService : AccessibilityService() {
     }
 
     private fun fightBoss(m: Int) {
-        // Harita açıkken random ışınlan; ardından haritadaki boss işaretine tıkla.
+        // Harita açıkken Random ışınlan; boss simgesine tıkla ve imlecin simgeye gelmesini bekle.
         say("Raklion " + m + ": Random ışınlanma")
         tapPoint("random")
         pause(2200)
         val bp = pt("boss" + m)
         tapFrac(bp.first, bp.second + ICON_DY)
-        pause(1000)
+        say("Boss simgesine doğru ilerleniyor")
+        val walkStart = System.currentTimeMillis()
+        var arrivedChecks = 0
+        while (running && System.currentTimeMillis() - walkStart < 60000L) {
+            pause(1200)
+            val shot = grab()
+            if (shot != null && cursorAtBoss(shot, m)) arrivedChecks++ else arrivedChecks = 0
+            if (arrivedChecks >= 2) break
+        }
+        if (arrivedChecks < 2) {
+            closeMapIfOpen()
+            say("Boss konumuna varış doğrulanamadı; saldırı başlatılmadı")
+            return
+        }
         if (mapOpen()) { tapPoint("closeMap"); pause(700) }
-        say("Boss konumuna ilerleniyor")
-        pause(WALK_OPTIONS[walkIdx] * 1000)
         tapPoint("manual")
         say("Oto saldırı açık; mini harita izleniyor")
         val t0 = System.currentTimeMillis()
