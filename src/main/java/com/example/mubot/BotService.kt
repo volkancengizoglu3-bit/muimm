@@ -122,11 +122,16 @@ class BotService : AccessibilityService() {
     private var startBtn: Button? = null
     private var lineBtn: Button? = null
     private var panelParams: WindowManager.LayoutParams? = null
+    private var menuParams: WindowManager.LayoutParams? = null
     private var compact = false
     private var dragStartX = 0f
     private var dragStartY = 0f
     private var dragOrigX = 0
     private var dragOrigY = 0
+    private var menuDragStartX = 0f
+    private var menuDragStartY = 0f
+    private var menuDragOrigX = 0
+    private var menuDragOrigY = 0
     private val panelButtons = ArrayList<View>()
     private val recognizer by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
     private var lastOcr = ""
@@ -874,11 +879,34 @@ class BotService : AccessibilityService() {
             } catch (e: Exception) {
             }
             menu = null
+            menuParams = menuParams
             return
         }
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+        root.setPadding(dp(8), dp(6), dp(8), dp(8))
+        val menuBg = GradientDrawable()
+        menuBg.setColor(0xEE101722.toInt())
+        menuBg.cornerRadius = dp(12).toFloat()
+        menuBg.setStroke(dp(1), 0xFF53657C.toInt())
+        root.background = menuBg
+
+        val header = LinearLayout(this)
+        header.orientation = LinearLayout.HORIZONTAL
+        header.gravity = Gravity.CENTER_VERTICAL
+        val title = TextView(this)
+        title.text = "AYAR NOKTALARI  •  SÜRÜKLE"
+        title.textSize = 12f
+        title.setTypeface(null, android.graphics.Typeface.BOLD)
+        title.setTextColor(0xFFF5C45E.toInt())
+        title.setPadding(dp(6), dp(8), dp(12), dp(8))
+        header.addView(title, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        val close = mkBtn("✕") { toggleMenu() }
+        header.addView(close)
+        root.addView(header)
+
         val row = LinearLayout(this)
         row.orientation = LinearLayout.HORIZONTAL
-        row.setBackgroundColor(0xAA000000.toInt())
         val left = LinearLayout(this)
         left.orientation = LinearLayout.VERTICAL
         val right = LinearLayout(this)
@@ -893,6 +921,7 @@ class BotService : AccessibilityService() {
         addBtn(right, mkBtn("Menuyu kapat") { toggleMenu() })
         row.addView(left)
         row.addView(right)
+        root.addView(row)
 
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -902,10 +931,29 @@ class BotService : AccessibilityService() {
             PixelFormat.TRANSLUCENT
         )
         lp.gravity = Gravity.TOP or Gravity.START
-        lp.x = dp(200)
-        lp.y = dp(10)
-        wm.addView(row, lp)
-        menu = row
+        lp.x = menuParams?.x ?: dp(200)
+        lp.y = menuParams?.y ?: dp(10)
+        header.setOnTouchListener { _, ev ->
+            when (ev.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    menuDragStartX = ev.rawX
+                    menuDragStartY = ev.rawY
+                    menuDragOrigX = lp.x
+                    menuDragOrigY = lp.y
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    lp.x = menuDragOrigX + (ev.rawX - menuDragStartX).toInt()
+                    lp.y = menuDragOrigY + (ev.rawY - menuDragStartY).toInt()
+                    try { wm.updateViewLayout(root, lp) } catch (_: Exception) {}
+                    true
+                }
+                else -> true
+            }
+        }
+        menuParams = lp
+        wm.addView(root, lp)
+        menu = root
     }
 
     private fun removeExtra() {
