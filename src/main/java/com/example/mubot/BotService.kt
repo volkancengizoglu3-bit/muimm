@@ -53,12 +53,10 @@ class BotService : AccessibilityService() {
         const val LOAD_SEC = 5           // kanal degisince yukleme bekleme
         const val RECHECK_SEC = 8        // savas sirasinda boss durumunu kontrol araligi
         const val FIGHT_TIMEOUT_SEC = 600
-        const val ROW_STEP = 0.0397f     // Raklion 1 ve 2 satirlari arasi dikey mesafe
-        const val SWAMP_GAP = 0.0476f    // Raklion 2 ile alttaki Swamp of Peace satiri arasi mesafe
 
         val NAMES = listOf(
             "minimap", "wire", "ch1", "ch2", "ch3", "switchLine", "closeChannel", "closeMap",
-            "map1", "boss1", "boss2", "boss3", "manual", "random", "miniTL", "miniBR", "chat", "buffLink", "closeChat", "chatMap1", "chatMap2"
+            "boss1", "boss2", "boss3", "manual", "random", "miniTL", "miniBR", "chat", "buffLink", "closeChat", "chatMap1", "chatMap2"
         )
 
         val LABELS = mapOf(
@@ -70,7 +68,6 @@ class BotService : AccessibilityService() {
             "switchLine" to "Switch Line butonu",
             "closeChannel" to "Kanal ekrani X (kapat) dugmesi",
             "closeMap" to "Harita ekrani X (kapat) dugmesi",
-            "map1" to "Harita listesinde Raklion satiri (sadece sag-sol konumu kullanilir)",
             "boss1" to "Raklion 1 - birinci boss ismi",
             "boss2" to "Raklion 2 - tek boss ismi",
             "boss3" to "Raklion 1 - ikinci boss ismi",
@@ -95,7 +92,6 @@ class BotService : AccessibilityService() {
             "switchLine" to Pair(0.499f, 0.739f),
             "closeChannel" to Pair(0.637f, 0.202f),
             "closeMap" to Pair(0.894f, 0.157f),
-            "map1" to Pair(0.222f, 0.390f),
             "boss1" to Pair(0.469f, 0.494f),
             "boss2" to Pair(0.469f, 0.494f),
             "boss3" to Pair(0.469f, 0.494f),
@@ -300,38 +296,6 @@ class BotService : AccessibilityService() {
     private fun orangeAt(b: Bitmap, name: String): Boolean =
         frac(b, name, 0.012f, 0.020f) { c -> isOrange(c) } >= 0.12f
 
-    /**
-     * Sol haritalar listesinde Raklion'un hemen altindaki "Swamp of Peace" satirinin
-     * KIRMIZI Lv yazisini bulur (oyuncunun seviyesi yetmedigi icin kirmizi). Satirin dikey
-     * konumunu (ekran orani) dondurur, bulamazsa null.
-     */
-    private fun findSwampY(b: Bitmap): Float? {
-        val x0 = (0.255f * b.width).toInt()
-        val x1 = minOf(b.width - 1, (0.292f * b.width).toInt())
-        val y0 = (0.20f * b.height).toInt()
-        val y1 = minOf(b.height - 1, (0.70f * b.height).toInt())
-        var runStart = -1
-        var lastHit = -1
-        var y = y0
-        while (y <= y1) {
-            var cnt = 0
-            var x = x0
-            while (x <= x1) {
-                if (isRed(b.getPixel(x, y))) cnt++
-                x++
-            }
-            if (cnt >= 3) {
-                if (runStart < 0) runStart = y
-                lastHit = y
-            } else if (runStart >= 0 && y - lastHit > 6) {
-                break
-            }
-            y++
-        }
-        if (runStart < 0 || lastHit - runStart < 8) return null
-        return ((runStart + lastHit) / 2f) / b.height
-    }
-
     // ------------------------------------------------------------------ dokunma
 
     private fun tapPx(x: Float, y: Float): Boolean {
@@ -416,14 +380,14 @@ class BotService : AccessibilityService() {
         return false
     }
 
-    private fun tapFrac(fx: Float, fy: Float) {
+    private fun tapFrac(fx: Float, fy: Float): Boolean {
         refreshScreen()
-        tapPx(fx * screenW, fy * screenH)
+        return tapPx(fx * screenW, fy * screenH)
     }
 
-    private fun tapPoint(name: String) {
+    private fun tapPoint(name: String): Boolean {
         val p = pt(name)
-        tapFrac(p.first, p.second)
+        return tapFrac(p.first, p.second)
     }
 
     // ------------------------------------------------------------------ bot adimlari
@@ -512,7 +476,8 @@ class BotService : AccessibilityService() {
     }
 
     private fun miniBossAlive(b: Bitmap): Boolean {
-        // Goldingen'deki gibi mini haritanin merkez bolgesini izle; kenardaki diger simgeleri sayma.
+        // MU Immortal Raklion boss simgesi KIRMIZI: sari piksel sayimi kullanilmaz.
+        // Mini haritanin merkez bolgesi taranir; dis kenardaki diger isaretler elenir.
         val a = pt("miniTL"); val c = pt("miniBR")
         val cx = (a.first + c.first) / 2f
         val cy = (a.second + c.second) / 2f
@@ -523,14 +488,13 @@ class BotService : AccessibilityService() {
         val y0 = maxOf(0, ((cy - halfH) * b.height).toInt())
         val y1 = minOf(b.height - 1, ((cy + halfH) * b.height).toInt())
         if (x1 <= x0 || y1 <= y0) return false
-        var hit = 0; var total = 0
+        var hit = 0
+        var total = 0
         for (y in y0..y1 step 2) for (x in x0..x1 step 2) {
             total++
-            val color = b.getPixel(x, y)
-            val r = Color.red(color); val g = Color.green(color); val bl = Color.blue(color)
-            if (r > 150 && g > 120 && bl < 80 && r - bl > 90) hit++
+            if (isRed(b.getPixel(x, y))) hit++
         }
-        return total > 0 && hit.toFloat() / total >= 0.0012f
+        return total > 0 && hit.toFloat() / total >= 0.0008f
     }
 
     private fun fightBoss(bossPoint: Int, mapNo: Int) {
@@ -592,12 +556,21 @@ class BotService : AccessibilityService() {
     }
 
     private fun goByChat(point: String) {
-        tapPoint("chat")
-        pause(600)
-        tapPoint(point)
-        pause(1800)
+        // Raklion gecisi yalnizca sohbet icindeki koordinat baglantisiyla yapilir.
+        // Merkez varsayilanlari gercek koordinat degildir; nokta kullanici tarafindan kalibre edilmeli.
+        if (!prefs().contains(point + "_x") || !prefs().contains(point + "_y")) {
+            fail("Işınlanma noktası ayarlanmamış: " + point + ". Ayarlar > " + point + " ile sohbet içindeki koordinat bağlantısına dokun.")
+        }
+        if (!tapPoint("chat")) fail("Chat açılamadı: dokunuş gönderilemedi.")
+        pause(900)
+        val before = grab() ?: fail("Chat açıldı mı kontrol edilemiyor; ekran görüntüsü alınamadı.")
+        if (!tapPoint(point)) fail("Chat koordinatına dokunuş gönderilemedi: " + point)
+        pause(2500)
+        val after = grab() ?: fail("Işınlanma kontrolü yapılamadı; ekran görüntüsü alınamadı.")
+        // Hedefe tıklandıktan sonra chat kapatılır; harita/kanal kontrolleri bir sonraki adımda yapılır.
         tapPoint("closeChat")
-        pause(400)
+        pause(700)
+        say("Chat koordinatı seçildi (" + point + "); geçişin oyun içinde tamamlandığı ayrıca kontrol edilmeli.")
     }
 
     private fun readAtkDef(b: Bitmap): Pair<Int, Int>? {
