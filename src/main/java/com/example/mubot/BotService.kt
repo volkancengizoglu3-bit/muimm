@@ -97,8 +97,9 @@ class BotService : AccessibilityService() {
             "boss3" to Pair(0.469f, 0.494f),
             "manual" to Pair(0.972f, 0.473f),
             "random" to Pair(0.868f, 0.814f),
-            "miniTL" to Pair(0.865f, 0.012f),
-            "miniBR" to Pair(0.985f, 0.190f),
+            // Screenshot: minimap is in the upper-right; boss marker sits near its left-center.
+            "miniTL" to Pair(0.798f, 0.008f),
+            "miniBR" to Pair(0.932f, 0.204f),
             "chat" to Pair(0.50f, 0.94f),
             "buffLink" to Pair(0.50f, 0.50f),
             "closeChat" to Pair(0.94f, 0.25f),
@@ -476,25 +477,27 @@ class BotService : AccessibilityService() {
     }
 
     private fun miniBossAlive(b: Bitmap): Boolean {
-        // MU Immortal Raklion boss simgesi KIRMIZI: sari piksel sayimi kullanilmaz.
-        // Mini haritanin merkez bolgesi taranir; dis kenardaki diger isaretler elenir.
+        // Boss simgesi mini haritanin sol-orta bolgesinde. Yesil oyuncu imleci
+        // ve mini harita disindaki arayuz pikselleri olcum alanina dahil edilmez.
         val a = pt("miniTL"); val c = pt("miniBR")
-        val cx = (a.first + c.first) / 2f
-        val cy = (a.second + c.second) / 2f
-        val halfW = (c.first - a.first) * 0.30f
-        val halfH = (c.second - a.second) * 0.30f
-        val x0 = maxOf(0, ((cx - halfW) * b.width).toInt())
-        val x1 = minOf(b.width - 1, ((cx + halfW) * b.width).toInt())
-        val y0 = maxOf(0, ((cy - halfH) * b.height).toInt())
-        val y1 = minOf(b.height - 1, ((cy + halfH) * b.height).toInt())
+        val x0 = maxOf(0, (a.first * b.width).toInt())
+        val x1 = minOf(b.width - 1, (c.first * b.width).toInt())
+        val y0 = maxOf(0, (a.second * b.height).toInt())
+        val y1 = minOf(b.height - 1, (c.second * b.height).toInt())
         if (x1 <= x0 || y1 <= y0) return false
-        var hit = 0
+        var red = 0
+        var grayOrBrown = 0
         var total = 0
         for (y in y0..y1 step 2) for (x in x0..x1 step 2) {
+            val color = b.getPixel(x, y)
+            val r = Color.red(color); val g = Color.green(color); val bl = Color.blue(color)
             total++
-            if (isRed(b.getPixel(x, y))) hit++
+            if (isRed(color) || (r > 150 && g in 35..150 && bl < 100 && r - bl > 65)) red++
+            if (r in 70..190 && g in 65..175 && bl in 45..135 && kotlin.math.abs(r - g) < 65) grayOrBrown++
         }
-        return total > 0 && hit.toFloat() / total >= 0.0008f
+        // Live is only confirmed by red/orange boss pixels; absence of red is not proof of death.
+        // Death verification itself compares multiple samples in fightBoss.
+        return total > 0 && red.toFloat() / total >= 0.00035f
     }
 
     private fun fightBoss(bossPoint: Int, mapNo: Int) {
