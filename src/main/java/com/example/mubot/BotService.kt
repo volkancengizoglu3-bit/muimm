@@ -843,7 +843,8 @@ class BotService : AccessibilityService() {
         title.textSize = 12f
         title.setTextColor(0xFFF5B83D.toInt())
         header.addView(title)
-        val minimize = mkBtn("—") {
+        lateinit var minimize: Button
+        minimize = mkBtn("—") {
             compact = !compact
             for (v in panelButtons) v.visibility = if (compact) View.GONE else View.VISIBLE
             minimize.text = if (compact) "+" else "—"
