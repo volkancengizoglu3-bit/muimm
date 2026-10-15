@@ -38,10 +38,10 @@ import rikka.shizuku.Shizuku
  * MU Immortal - Raklion boss kontrol botu.
  *
  * Mantik:
- *  - Her kanalda (1,2,3) haritayi acar, sol listeden Raklion 1/2/3'u sirayla secer.
- *  - Ghost Aragog ismi KIRMIZI ise canli, GRI ise olu demektir.
- *  - Canliysa boss'a dokunur (oyun yuruturu), sonra Manual dugmesine basip oyunun
- *    kendi otomatik saldirisini acar. Boss olunce otomatigi kapatir, siradaki kanala gecer.
+ *  - Chat koordinatiyla Raklion haritasina gidilir; harita acilinca liste kaydirilmaz.
+ *  - Boss ismi kirmiziysa Random'a basilir, haritanin acik oldugu dogrulanir,
+ *    sonra boss ismine tiklanip oyuncu imlecinin varisi beklenir.
+ *  - Boss olunce mini haritadaki simge solmasi kontrol edilir.
  */
 class BotService : AccessibilityService() {
 
@@ -327,53 +327,6 @@ class BotService : AccessibilityService() {
         return ((runStart + lastHit) / 2f) / b.height
     }
 
-    /** Listeyi parmakla surukler. delta: icerigin ekran yuksekligine gore kayma miktari (eksi = yukari). */
-    private fun dragList(delta: Float) {
-        refreshScreen()
-        val x = pt("map1").first * screenW
-        val y0 = (0.45f - delta / 2f) * screenH
-        val y1 = (0.45f + delta / 2f) * screenH
-        val xi = x.toInt().toString()
-        if (shizukuReady() &&
-            shell(arrayOf("input", "swipe", xi, y0.toInt().toString(), xi, y1.toInt().toString(), "900"))
-        ) {
-            return
-        }
-        val p = Path()
-        p.moveTo(x, y0)
-        p.lineTo(x, y1)
-        runGesture(p, 900L)
-    }
-
-    /** Haritada Raklion 1 ve 2 satirlari gorunene kadar listeyi kaydirir ve konumlarini hesaplar. */
-    private fun prepareList() {
-        say("Harita listesi kaydiriliyor")
-        for (i in 0 until 14) {
-            val b = grab()
-            if (b == null) continue
-            val a = findSwampY(b)
-            if (a == null) {
-                dragList(if (i < 7) -0.22f else 0.22f)
-                pause(1000)
-                continue
-            }
-            if (a < 0.36f || a > 0.64f) {
-                dragList((0.50f - a).coerceIn(-0.25f, 0.25f))
-                pause(1000)
-                continue
-            }
-            val r2 = a - SWAMP_GAP
-            listYs[2] = r2
-            listYs[1] = r2 - ROW_STEP
-            return
-        }
-        fail("Harita listesinde Raklion bulunamadi (liste kaydirilamadi)")
-    }
-
-    private fun tapMapRow(m: Int) {
-        tapFrac(pt("map1").first, listYs[m])
-    }
-
     // ------------------------------------------------------------------ dokunma
 
     private fun tapPx(x: Float, y: Float): Boolean {
@@ -490,7 +443,6 @@ class BotService : AccessibilityService() {
             }
         }
         if (!ok) fail("Harita acilamadi. 'Ayar' ile minimap ve closeMap noktalarini kontrol et.")
-        prepareList()
     }
 
     private fun closeMapIfOpen() {
@@ -522,9 +474,10 @@ class BotService : AccessibilityService() {
     private fun scanBoss(line: Int, mapNo: Int, bossPoint: Int): Boolean {
         val bossLabel = if (mapNo == 2) "Raklion 2 tek boss" else if (bossPoint == 1) "Raklion 1 boss 1" else "Raklion 1 boss 2"
         say("Kanal " + line + " / " + bossLabel + " kontrol ediliyor")
+        // Chat koordinatiyla zaten hedef Raklion haritasindayiz; harita listesinden satir
+        // secmek/kaydirma hem gereksiz hem de Random dugmesinin yerini etkileyebilir.
         openMap()
-        tapMapRow(mapNo)
-        pause(1000)
+        pause(350)
         val b = grab()
         val alive = b != null && bossAlive(b, bossPoint)
         if (!alive) closeMapIfOpen()
@@ -578,11 +531,27 @@ class BotService : AccessibilityService() {
     private fun fightBoss(bossPoint: Int, mapNo: Int) {
         // Harita açıkken Random ışınlan; boss simgesine tıkla ve imlecin simgeye gelmesini bekle.
         val bossLabel = if (mapNo == 2) "Raklion 2 tek boss" else if (bossPoint == 1) "Raklion 1 boss 1" else "Raklion 1 boss 2"
-        say(bossLabel + ": Random ışınlanma")
+        say(bossLabel + ": Random düğmesine basılıyor")
+        val sentBeforeRandom = sent
         tapPoint("random")
-        pause(2200)
+        pause(2500)
+
+        // Goldingen'deki çalışan akış gibi Random'dan sonra haritanın durumunu yeniden
+        // kontrol et. Harita kapanmışsa tekrar açmadan boss koordinatına dokunma.
+        if (!mapOpen()) {
+            say("Random sonrası harita kapandı; tekrar açılıyor")
+            openMap()
+            pause(700)
+        }
+        if (sent == sentBeforeRandom) {
+            say("Random dokunuşu gönderilemedi; nokta ayarını kontrol et")
+            closeMapIfOpen()
+            return
+        }
         val bp = pt("boss" + bossPoint)
+        say("Random sonrası boss işaretine dokunuluyor")
         tapFrac(bp.first, bp.second + ICON_DY)
+        pause(700)
         say("Boss simgesine doğru ilerleniyor")
         val walkStart = System.currentTimeMillis()
         var arrivedChecks = 0
