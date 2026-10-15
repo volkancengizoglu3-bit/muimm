@@ -27,6 +27,10 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import android.view.View
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import rikka.shizuku.Shizuku
@@ -55,7 +59,7 @@ class BotService : AccessibilityService() {
 
         val NAMES = listOf(
             "minimap", "wire", "ch1", "ch2", "ch3", "switchLine", "closeChannel", "closeMap",
-            "map1", "boss1", "boss2", "boss3", "manual", "random", "miniTL", "miniBR", "chat", "buffLink", "closeChat"
+            "map1", "boss1", "boss2", "boss3", "manual", "random", "miniTL", "miniBR", "chat", "buffLink", "closeChat", "chatMap1", "chatMap2"
         )
 
         val LABELS = mapOf(
@@ -77,7 +81,9 @@ class BotService : AccessibilityService() {
             "miniBR" to "Mini harita sag alt kose",
             "chat" to "Chat acma noktasi",
             "buffLink" to "Chat icindeki buff koordinati",
-            "closeChat" to "Chat kapatma noktasi"
+            "closeChat" to "Chat kapatma noktasi",
+            "chatMap1" to "Chat icinde Raklion 1 hedef koordinati",
+            "chatMap2" to "Chat icinde Raklion 2 hedef koordinati"
         )
 
         // Ekran goruntulerinden (2419x1512) hesaplanan oranlar
@@ -100,7 +106,9 @@ class BotService : AccessibilityService() {
             "miniBR" to Pair(0.985f, 0.190f),
             "chat" to Pair(0.50f, 0.94f),
             "buffLink" to Pair(0.50f, 0.50f),
-            "closeChat" to Pair(0.94f, 0.25f)
+            "closeChat" to Pair(0.94f, 0.25f),
+            "chatMap1" to Pair(0.50f, 0.50f),
+            "chatMap2" to Pair(0.50f, 0.50f)
         )
 
         val WALK_OPTIONS = listOf(10, 15, 20, 30, 45)
@@ -123,6 +131,8 @@ class BotService : AccessibilityService() {
     private var dragOrigX = 0
     private var dragOrigY = 0
     private val panelButtons = ArrayList<View>()
+    private val recognizer by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
+    private var lastOcr = ""
 
     @Volatile
     private var running = false
@@ -515,20 +525,15 @@ class BotService : AccessibilityService() {
     }
 
     /** Bu kanalda canli boss varsa harita numarasini (1..3) dondurur, yoksa 0. Canliysa harita acik kalir. */
-    private fun scanLine(line: Int): Int {
-        say("Kanal " + line + " taraniyor")
+    private fun scanLine(line: Int, mapNo: Int): Boolean {
+        say("Kanal " + line + " / Raklion " + mapNo + " kontrol ediliyor")
         openMap()
-        for (m in 1..3) {
-            tapMapRow(m)
-            pause(1200)
-            val b = grab() ?: continue
-            if (bossAlive(b, m)) {
-                say("Kanal " + line + " / Raklion " + m + ": boss CANLI")
-                return m
-            }
-        }
-        closeMapIfOpen()
-        return 0
+        tapMapRow(mapNo)
+        pause(1000)
+        val b = grab()
+        val alive = b != null && bossAlive(b, mapNo)
+        if (!alive) closeMapIfOpen()
+        return alive
     }
 
     private fun miniBossAlive(b: Bitmap): Boolean {
@@ -576,18 +581,62 @@ class BotService : AccessibilityService() {
         pause(600)
     }
 
+    private fun goByChat(point: String) {
+        tapPoint("chat")
+        pause(600)
+        tapPoint(point)
+        pause(1800)
+        tapPoint("closeChat")
+        pause(400)
+    }
+
+    private fun readAtkDef(b: Bitmap): Pair<Int, Int>? {
+        return try {
+            val w = (0.27f * b.width).toInt()
+            val h = (0.07f * b.height).toInt()
+            val crop = Bitmap.createBitmap(b, 0, 0, w, h)
+            val big = Bitmap.createScaledBitmap(crop, w * 3, h * 3, true)
+            val result = Tasks.await(recognizer.process(InputImage.fromBitmap(big, 0)), 8, TimeUnit.SECONDS)
+            lastOcr = result.text.replace("\\n", " ")
+            val normalized = result.text.replace(Regex("[\\s,.]"), "")
+            val values = Regex("\\d{3,6}").findAll(normalized).mapNotNull { it.value.toIntOrNull() }.toList()
+            crop.recycle(); big.recycle()
+            if (values.size >= 2) Pair(values[0], values[1]) else null
+        } catch (e: Exception) { lastOcr = e.message ?: "OCR hatasi"; null }
+    }
+
+    private fun goBuffIfNeeded() {
+        if (!prefs().getBoolean("cfg_buffOn", false)) { say("Buff kapali; boss dongusu devam ediyor"); return }
+        val shot = grab() ?: run { say("Buff kontrolu: ekran goruntusu yok"); return }
+        val values = readAtkDef(shot)
+        if (values == null) { say("ATK/DEF okunamadi; buff karari verilmedi: " + lastOcr); return }
+        val minAtk = prefs().getInt("cfg_minAtk", 0)
+        val minDef = prefs().getInt("cfg_minDef", 0)
+        val need = (minAtk > 0 && values.first < minAtk) || (minDef > 0 && values.second < minDef)
+        say("ATK " + values.first + " / DEF " + values.second + if (need) " — buff gerekiyor" else " — buff yeterli")
+        if (need) goByChat("buffLink")
+    }
+
     private fun runLoop() {
-        var line = startLine
-        var needSwitch = false
+        var line = 1
+        var mapPos = 0 // Raklion 2, ardından Raklion 1
+        goByChat("chatMap2")
+        switchLine(1)
+        goBuffIfNeeded()
         while (running) {
-            if (needSwitch) switchLine(line)
-            needSwitch = true
-            val m = scanLine(line)
-            if (m > 0) {
-                fightBoss(m)
-                needSwitch = false
+            val mapNo = if (mapPos == 0) 2 else 1
+            if (scanLine(line, mapNo)) {
+                fightBoss(mapNo)
+                goBuffIfNeeded()
+            }
+            if (line < 3) {
+                line++
+                switchLine(line)
             } else {
-                line = line % 3 + 1
+                line = 1
+                mapPos = (mapPos + 1) % 2
+                goByChat(if (mapPos == 0) "chatMap2" else "chatMap1")
+                switchLine(1)
             }
         }
     }
