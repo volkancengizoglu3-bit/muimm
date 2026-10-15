@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Path
+import android.graphics.PointF
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
@@ -25,6 +26,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import android.view.View
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import rikka.shizuku.Shizuku
@@ -53,7 +55,7 @@ class BotService : AccessibilityService() {
 
         val NAMES = listOf(
             "minimap", "wire", "ch1", "ch2", "ch3", "switchLine", "closeChannel", "closeMap",
-            "map1", "boss1", "boss2", "boss3", "manual"
+            "map1", "boss1", "boss2", "boss3", "manual", "random", "miniTL", "miniBR", "chat", "buffLink", "closeChat"
         )
 
         val LABELS = mapOf(
@@ -69,7 +71,13 @@ class BotService : AccessibilityService() {
             "boss1" to "Raklion 1 haritasinda Ghost Aragog ISMI",
             "boss2" to "Raklion 2 haritasinda Ghost Aragog ISMI",
             "boss3" to "Raklion 3 haritasinda Ghost Aragog ISMI",
-            "manual" to "Manual (oto saldiri) dugmesi"
+            "manual" to "Manual (oto saldiri) dugmesi",
+            "random" to "Harita sag alt Random dugmesi",
+            "miniTL" to "Mini harita sol ust kose",
+            "miniBR" to "Mini harita sag alt kose",
+            "chat" to "Chat acma noktasi",
+            "buffLink" to "Chat icindeki buff koordinati",
+            "closeChat" to "Chat kapatma noktasi"
         )
 
         // Ekran goruntulerinden (2419x1512) hesaplanan oranlar
@@ -86,7 +94,13 @@ class BotService : AccessibilityService() {
             "boss1" to Pair(0.469f, 0.494f),
             "boss2" to Pair(0.469f, 0.494f),
             "boss3" to Pair(0.469f, 0.494f),
-            "manual" to Pair(0.972f, 0.473f)
+            "manual" to Pair(0.972f, 0.473f),
+            "random" to Pair(0.868f, 0.814f),
+            "miniTL" to Pair(0.865f, 0.012f),
+            "miniBR" to Pair(0.985f, 0.190f),
+            "chat" to Pair(0.50f, 0.94f),
+            "buffLink" to Pair(0.50f, 0.50f),
+            "closeChat" to Pair(0.94f, 0.25f)
         )
 
         val WALK_OPTIONS = listOf(10, 15, 20, 30, 45)
@@ -102,6 +116,13 @@ class BotService : AccessibilityService() {
     private var startBtn: Button? = null
     private var lineBtn: Button? = null
     private var walkBtn: Button? = null
+    private var panelParams: WindowManager.LayoutParams? = null
+    private var compact = false
+    private var dragStartX = 0f
+    private var dragStartY = 0f
+    private var dragOrigX = 0
+    private var dragOrigY = 0
+    private val panelButtons = ArrayList<View>()
 
     @Volatile
     private var running = false
@@ -510,38 +531,49 @@ class BotService : AccessibilityService() {
         return 0
     }
 
+    private fun miniBossAlive(b: Bitmap): Boolean {
+        val a = pt("miniTL"); val c = pt("miniBR")
+        val x0 = maxOf(0, (a.first * b.width).toInt()); val x1 = minOf(b.width - 1, (c.first * b.width).toInt())
+        val y0 = maxOf(0, (a.second * b.height).toInt()); val y1 = minOf(b.height - 1, (c.second * b.height).toInt())
+        if (x1 <= x0 || y1 <= y0) return false
+        var hit = 0; var total = 0
+        for (y in y0..y1 step 2) for (x in x0..x1 step 2) {
+            total++
+            val color = b.getPixel(x, y)
+            val r = Color.red(color); val g = Color.green(color); val bl = Color.blue(color)
+            if (r > 150 && g > 120 && bl < 80 && r - bl > 90) hit++
+        }
+        return total > 0 && hit.toFloat() / total >= 0.0012f
+    }
+
     private fun fightBoss(m: Int) {
+        // Harita açıkken random ışınlan; ardından haritadaki boss işaretine tıkla.
+        say("Raklion " + m + ": Random ışınlanma")
+        tapPoint("random")
+        pause(2200)
         val bp = pt("boss" + m)
         tapFrac(bp.first, bp.second + ICON_DY)
-        pause(1200)
-        if (mapOpen()) {
-            tapPoint("closeMap")
-            pause(800)
-        }
-        say("Raklion " + m + " boss'una yuruyor")
+        pause(1000)
+        if (mapOpen()) { tapPoint("closeMap"); pause(700) }
+        say("Boss konumuna ilerleniyor")
         pause(WALK_OPTIONS[walkIdx] * 1000)
         tapPoint("manual")
-        say("Oto saldiri acildi, boss izleniyor")
+        say("Oto saldırı açık; mini harita izleniyor")
         val t0 = System.currentTimeMillis()
+        var faded = 0
         while (running) {
             pause(RECHECK_SEC * 1000)
-            openMap()
-            tapMapRow(m)
-            pause(1200)
             val b = grab()
-            val alive = b != null && bossAlive(b, m)
-            closeMapIfOpen()
-            if (!alive) {
-                say("Boss oldu")
-                break
+            if (b != null) {
+                if (miniBossAlive(b)) faded = 0 else faded++
+                if (faded >= 2) { say("Mini harita boss simgesi soldu; boss öldü"); break }
             }
             if (System.currentTimeMillis() - t0 > FIGHT_TIMEOUT_SEC * 1000L) {
-                say("Zaman asimi, boss'tan vazgecildi")
-                break
+                say("Savaş zaman aşımı; sonraki kanala geçiliyor"); break
             }
         }
         tapPoint("manual")
-        pause(800)
+        pause(600)
     }
 
     private fun runLoop() {
@@ -692,6 +724,7 @@ class BotService : AccessibilityService() {
         val sb = mkBtn("▶ Baslat") { toggle() }
         startBtn = sb
         addBtn(col, sb)
+        panelButtons.add(sb)
 
         val lb = mkBtn("Baslangic kanali: 1") {
             startLine = startLine % 3 + 1
@@ -699,6 +732,7 @@ class BotService : AccessibilityService() {
         }
         lineBtn = lb
         addBtn(col, lb)
+        panelButtons.add(lb)
 
         val wb = mkBtn("Yuruyus suresi") {
             walkIdx = (walkIdx + 1) % WALK_OPTIONS.size
@@ -706,12 +740,36 @@ class BotService : AccessibilityService() {
         }
         walkBtn = wb
         addBtn(col, wb)
+        panelButtons.add(wb)
 
-        addBtn(col, mkBtn("Shizuku izni") { shizukuAsk() })
-        addBtn(col, mkBtn("Tik testi") { tapTest() })
-        addBtn(col, mkBtn("Test") { runTest() })
-        addBtn(col, mkBtn("Ayar") { toggleMenu() })
+        val sh = mkBtn("Shizuku izni") { shizukuAsk() }; addBtn(col, sh); panelButtons.add(sh)
+        val tt = mkBtn("Tik testi") { tapTest() }; addBtn(col, tt); panelButtons.add(tt)
+        val ts = mkBtn("Test") { runTest() }; addBtn(col, ts); panelButtons.add(ts)
+        val ay = mkBtn("Ayar") { toggleMenu() }; addBtn(col, ay); panelButtons.add(ay)
 
+        val header = LinearLayout(this)
+        header.orientation = LinearLayout.HORIZONTAL
+        header.gravity = Gravity.CENTER_VERTICAL
+        val title = TextView(this)
+        title.text = "BOSSINGEN  ⋮  sürükle"
+        title.textSize = 12f
+        title.setTextColor(0xFFF5B83D.toInt())
+        header.addView(title)
+        val minimize = mkBtn("—") {
+            compact = !compact
+            for (v in panelButtons) v.visibility = if (compact) View.GONE else View.VISIBLE
+            minimize.text = if (compact) "+" else "—"
+        }
+        header.addView(minimize)
+        col.addView(header, 0)
+        header.setOnTouchListener { _, ev ->
+            val params = panelParams
+            when (ev.action) {
+                MotionEvent.ACTION_DOWN -> { dragStartX = ev.rawX; dragStartY = ev.rawY; dragOrigX = params?.x ?: 0; dragOrigY = params?.y ?: 0; true }
+                MotionEvent.ACTION_MOVE -> { if (params != null) { params.x = dragOrigX + (ev.rawX - dragStartX).toInt(); params.y = dragOrigY + (ev.rawY - dragStartY).toInt(); try { wm.updateViewLayout(col, params) } catch (_: Exception) {} }; true }
+                else -> true
+            }
+        }
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -721,7 +779,8 @@ class BotService : AccessibilityService() {
         )
         lp.gravity = Gravity.TOP or Gravity.START
         lp.x = 0
-        lp.y = (screenH * 0.50f).toInt()
+        lp.y = (screenH * 0.35f).toInt()
+        panelParams = lp
         wm.addView(col, lp)
         panel = col
         updateUi()
