@@ -558,9 +558,16 @@ class BotService : AccessibilityService() {
     }
 
     private fun miniBossAlive(b: Bitmap): Boolean {
+        // Goldingen'deki gibi mini haritanin merkez bolgesini izle; kenardaki diger simgeleri sayma.
         val a = pt("miniTL"); val c = pt("miniBR")
-        val x0 = maxOf(0, (a.first * b.width).toInt()); val x1 = minOf(b.width - 1, (c.first * b.width).toInt())
-        val y0 = maxOf(0, (a.second * b.height).toInt()); val y1 = minOf(b.height - 1, (c.second * b.height).toInt())
+        val cx = (a.first + c.first) / 2f
+        val cy = (a.second + c.second) / 2f
+        val halfW = (c.first - a.first) * 0.30f
+        val halfH = (c.second - a.second) * 0.30f
+        val x0 = maxOf(0, ((cx - halfW) * b.width).toInt())
+        val x1 = minOf(b.width - 1, ((cx + halfW) * b.width).toInt())
+        val y0 = maxOf(0, ((cy - halfH) * b.height).toInt())
+        val y1 = minOf(b.height - 1, ((cy + halfH) * b.height).toInt())
         if (x1 <= x0 || y1 <= y0) return false
         var hit = 0; var total = 0
         for (y in y0..y1 step 2) for (x in x0..x1 step 2) {
