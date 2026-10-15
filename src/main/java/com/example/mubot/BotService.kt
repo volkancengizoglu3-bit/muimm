@@ -667,7 +667,6 @@ class BotService : AccessibilityService() {
     }
 
     private fun runLoop() {
-    private fun runLoop() {
         var line = 1
         var mapPos = 0 // Raklion 2 (tek boss), sonra Raklion 1 (iki boss)
         goByChat("chatMap2")
@@ -865,7 +864,7 @@ class BotService : AccessibilityService() {
         title.setTypeface(null, android.graphics.Typeface.BOLD)
         title.setTextColor(0xFFF5C45E.toInt())
         title.setPadding(dp(2), dp(4), dp(10), dp(6))
-        header.addView(title, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        header.addView(title, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         lateinit var minimize: Button
         minimize = mkBtn("—") {
             compact = !compact
