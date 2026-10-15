@@ -59,7 +59,7 @@ class MainActivity : Activity() {
             setTypeface(null, Typeface.BOLD)
             setPadding(0, dp(4), 0, dp(2))
         })
-        root.addView(body("Raklion 2 → 3 kanal → Raklion 1 → 3 kanal. Boss durumu mini haritadan takip edilir."))
+        root.addView(body("Sıralı rota: Raklion 2 (tek boss) → Kanal 1–3 → Raklion 1 (iki boss) → Kanal 1–3. Boss simgesi ekranın sağ üstündeki mini haritadan izlenir."))
 
         val access = makeCard()
         access.addView(section("01  /  BAŞLATMA"))
@@ -71,7 +71,7 @@ class MainActivity : Activity() {
 
         val buff = makeCard()
         buff.addView(section("02  /  BUFF PROTOKOLÜ"))
-        buff.addView(body("Buff açıkken başlangıçta ve her boss öldüğünde ATK/DEF okunur. ATK veya DEF kendi sınırının altındaysa chat üzerinden kayıtlı buff koordinatına gidilir. Değerler okunamazsa bot buff kararını güvenli biçimde atlar."))
+        buff.addView(body("Buff açıkken başlangıçta ve her boss öldüğünde ATK/DEF okunur. Eşiklerden biri aşılmamışsa bot önce Kanal 1’e geçer, chat içindeki buff koordinatına gider, değerleri tekrar okur ve kaldığı harita/kanal rotasına döner. Değerler okunamazsa buff kararı verilmez."))
         buffEnabled = CheckBox(this).apply {
             text = "Buff alma açık"
             textSize = 15f
@@ -92,8 +92,8 @@ class MainActivity : Activity() {
         points.addView(body("Oyunda yüzen panelde Ayar düğmesine bas. Her nokta için ilgili satırı seçip oyunda hedefe dokun. Aşağıdaki noktaları mutlaka kaydet ve Tik testi ile doğrula."))
         val required = listOf(
             "random — haritanın sağ altındaki Random",
-            "boss1 / boss2 — ilgili haritadaki boss simgesi",
-            "miniTL / miniBR — mini haritanın sol üst ve sağ alt köşeleri",
+            "boss1 — Raklion 1 birinci boss; boss3 — Raklion 1 ikinci boss; boss2 — Raklion 2 tek boss",
+            "miniTL / miniBR — ekranın sağ üstündeki mini haritanın sol üst ve sağ alt köşeleri",
             "chat — chat açma alanı",
             "chatMap1 / chatMap2 — chat içindeki Raklion 1 ve Raklion 2 koordinatları",
             "buffLink — chat içindeki buff konum koordinatı",
@@ -101,12 +101,12 @@ class MainActivity : Activity() {
             "manual — otomatik saldırı düğmesi"
         )
         required.forEach { points.addView(body("•  $it")) }
-        points.addView(body("Boss işaretleri ve chat hedefleri oyun arayüzüne göre değişebilir. Otomasyonu başlatmadan önce tüm noktaları doğru ekranda ayarla."))
+        points.addView(body("Boss işaretleri ve chat hedefleri oyun arayüzüne göre değişebilir. boss1, boss2 ve boss3 noktalarını ayrı ayrı doğru boss isimlerinin üzerine kaydet; miniTL/miniBR noktalarını sağ üst mini haritanın sınırlarına yerleştir."))
         root.addView(points, margin())
 
         val safety = makeCard()
         safety.addView(section("04  /  ÇALIŞMA NOTLARI"))
-        safety.addView(body("İlk çalıştırmada karakterin Raklion 2'ye geçişini, kanal değişimini ve mini harita simgesinin solma eşiğini gözlemle. OCR ile ATK/DEF okuma oyun yazı tipine göre cihazda doğrulanmalıdır."))
+        safety.addView(body("İlk çalıştırmada Raklion 2 → Raklion 1 geçişini, 1–3 kanal döngüsünü, buff öncesi Kanal 1’e geçildiğini ve sağ üst mini harita simgesinin solma eşiğini gözlemle. OCR ile ATK/DEF okuma oyun yazı tipine göre cihazda doğrulanmalıdır."))
         root.addView(safety)
     }
 
