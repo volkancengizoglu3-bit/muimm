@@ -652,23 +652,40 @@ class BotService : AccessibilityService() {
     }
 
     private fun start() {
-        if (running) return
-        if (worker?.isAlive == true) {
-            say("Onceki islem bitiyor, biraz bekle")
+        if (running) {
+            say("Otomasyon zaten çalışıyor.")
             return
         }
+        if (worker?.isAlive == true) {
+            say("Önceki işlem kapanıyor; 1-2 saniye sonra tekrar dene.")
+            return
+        }
+
+        // Never fail silently on the first click: Raklion 2 chat target must be calibrated.
+        val p = prefs()
+        if (!p.contains("chatMap2_x") || !p.contains("chatMap2_y")) {
+            val msg = "Başlatılamadı: Ayar > chatMap2 seç, oyunda sohbet içindeki Raklion 2 koordinatına dokun. Sonra yeniden başlat."
+            say(msg)
+            ui { Toast.makeText(this, msg, Toast.LENGTH_LONG).show() }
+            return
+        }
+
         running = true
+        say("Başlatılıyor: Raklion 2 / Kanal 1...")
         updateUi()
         val t = Thread {
             try {
                 runLoop()
             } catch (e: StopEx) {
+                // fail() already places the precise reason in the floating status.
             } catch (e: InterruptedException) {
+                if (running) say("İşlem beklenmedik şekilde kesildi.")
             } catch (e: Exception) {
-                say("Hata: " + e.message)
+                say("Hata: " + (e.message ?: e.javaClass.simpleName))
+            } finally {
+                running = false
+                ui { updateUi() }
             }
-            running = false
-            ui { updateUi() }
         }
         worker = t
         t.start()
