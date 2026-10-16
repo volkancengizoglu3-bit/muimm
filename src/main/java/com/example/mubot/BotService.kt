@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Path
+import android.graphics.PointF
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
@@ -17,7 +18,6 @@ import android.os.Looper
 import android.view.Display
 import android.view.Gravity
 import android.view.MotionEvent
-import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.widget.Button
@@ -25,6 +25,11 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import android.view.View
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import rikka.shizuku.Shizuku
@@ -33,10 +38,10 @@ import rikka.shizuku.Shizuku
  * MU Immortal - Raklion boss kontrol botu.
  *
  * Mantik:
- *  - Her kanalda (1,2,3) haritayi acar, sol listeden Raklion 1/2/3'u sirayla secer.
- *  - Ghost Aragog ismi KIRMIZI ise canli, GRI ise olu demektir.
- *  - Canliysa boss'a dokunur (oyun yuruturu), sonra Manual dugmesine basip oyunun
- *    kendi otomatik saldirisini acar. Boss olunce otomatigi kapatir, siradaki kanala gecer.
+ *  - Chat koordinatiyla Raklion haritasina gidilir; harita acilinca liste kaydirilmaz.
+ *  - Boss ismi kirmiziysa Random'a basilir, haritanin acik oldugu dogrulanir,
+ *    sonra boss ismine tiklanip oyuncu imlecinin varisi beklenir.
+ *  - Boss olunce mini haritadaki simge solmasi kontrol edilir.
  */
 class BotService : AccessibilityService() {
 
@@ -48,12 +53,10 @@ class BotService : AccessibilityService() {
         const val LOAD_SEC = 5           // kanal degisince yukleme bekleme
         const val RECHECK_SEC = 8        // savas sirasinda boss durumunu kontrol araligi
         const val FIGHT_TIMEOUT_SEC = 600
-        const val ROW_STEP = 0.0397f     // Raklion 1/2/3 satirlari arasi dikey mesafe
-        const val SWAMP_GAP = 0.0476f    // Raklion 3 ile alttaki kirmizi Lv satiri arasi mesafe
 
         val NAMES = listOf(
             "minimap", "wire", "ch1", "ch2", "ch3", "switchLine", "closeChannel", "closeMap",
-            "map1", "boss1", "boss2", "boss3", "manual"
+            "boss1", "boss2", "boss3", "manual", "random", "miniTL", "miniBR", "chat", "buffLink", "closeChat", "chatMap1", "chatMap2"
         )
 
         val LABELS = mapOf(
@@ -65,11 +68,18 @@ class BotService : AccessibilityService() {
             "switchLine" to "Switch Line butonu",
             "closeChannel" to "Kanal ekrani X (kapat) dugmesi",
             "closeMap" to "Harita ekrani X (kapat) dugmesi",
-            "map1" to "Harita listesinde Raklion satiri (sadece sag-sol konumu kullanilir)",
-            "boss1" to "Raklion 1 haritasinda Ghost Aragog ISMI",
-            "boss2" to "Raklion 2 haritasinda Ghost Aragog ISMI",
-            "boss3" to "Raklion 3 haritasinda Ghost Aragog ISMI",
-            "manual" to "Manual (oto saldiri) dugmesi"
+            "boss1" to "Raklion 1 - birinci boss ismi",
+            "boss2" to "Raklion 2 - tek boss ismi",
+            "boss3" to "Raklion 1 - ikinci boss ismi",
+            "manual" to "Manual (oto saldiri) dugmesi",
+            "random" to "Harita sag alt Random dugmesi",
+            "miniTL" to "Sag ustteki mini haritanin sol ust kosesi",
+            "miniBR" to "Sag ustteki mini haritanin sag alt kosesi",
+            "chat" to "Chat acma noktasi",
+            "buffLink" to "Chat icindeki buff koordinati",
+            "closeChat" to "Chat kapatma noktasi",
+            "chatMap1" to "Chat icinde Raklion 1 hedef koordinati",
+            "chatMap2" to "Chat icinde Raklion 2 hedef koordinati"
         )
 
         // Ekran goruntulerinden (2419x1512) hesaplanan oranlar
@@ -82,14 +92,21 @@ class BotService : AccessibilityService() {
             "switchLine" to Pair(0.499f, 0.739f),
             "closeChannel" to Pair(0.637f, 0.202f),
             "closeMap" to Pair(0.894f, 0.157f),
-            "map1" to Pair(0.222f, 0.390f),
             "boss1" to Pair(0.469f, 0.494f),
             "boss2" to Pair(0.469f, 0.494f),
             "boss3" to Pair(0.469f, 0.494f),
-            "manual" to Pair(0.972f, 0.473f)
+            "manual" to Pair(0.972f, 0.473f),
+            "random" to Pair(0.868f, 0.814f),
+            // Screenshot: minimap is in the upper-right; boss marker sits near its left-center.
+            "miniTL" to Pair(0.798f, 0.008f),
+            "miniBR" to Pair(0.932f, 0.204f),
+            "chat" to Pair(0.50f, 0.94f),
+            "buffLink" to Pair(0.50f, 0.50f),
+            "closeChat" to Pair(0.94f, 0.25f),
+            "chatMap1" to Pair(0.50f, 0.50f),
+            "chatMap2" to Pair(0.50f, 0.50f)
         )
 
-        val WALK_OPTIONS = listOf(10, 15, 20, 30, 45)
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -101,14 +118,25 @@ class BotService : AccessibilityService() {
     private var statusView: TextView? = null
     private var startBtn: Button? = null
     private var lineBtn: Button? = null
-    private var walkBtn: Button? = null
+    private var panelParams: WindowManager.LayoutParams? = null
+    private var menuParams: WindowManager.LayoutParams? = null
+    private var compact = false
+    private var dragStartX = 0f
+    private var dragStartY = 0f
+    private var dragOrigX = 0
+    private var dragOrigY = 0
+    private var menuDragStartX = 0f
+    private var menuDragStartY = 0f
+    private var menuDragOrigX = 0
+    private var menuDragOrigY = 0
+    private val panelButtons = ArrayList<View>()
+    private val recognizer by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
+    private var lastOcr = ""
 
     @Volatile
     private var running = false
     private var worker: Thread? = null
 
-    private var startLine = 1
-    private var walkIdx = 1
     private var sent = 0
     private var cancelled = 0
     private var lastShot = 0L
@@ -269,86 +297,6 @@ class BotService : AccessibilityService() {
     private fun orangeAt(b: Bitmap, name: String): Boolean =
         frac(b, name, 0.012f, 0.020f) { c -> isOrange(c) } >= 0.12f
 
-    /**
-     * Sol haritalar listesinde Raklion'un hemen altindaki "Swamp of Peace" satirinin
-     * KIRMIZI Lv yazisini bulur (oyuncunun seviyesi yetmedigi icin kirmizi). Satirin dikey
-     * konumunu (ekran orani) dondurur, bulamazsa null.
-     */
-    private fun findSwampY(b: Bitmap): Float? {
-        val x0 = (0.255f * b.width).toInt()
-        val x1 = minOf(b.width - 1, (0.292f * b.width).toInt())
-        val y0 = (0.20f * b.height).toInt()
-        val y1 = minOf(b.height - 1, (0.70f * b.height).toInt())
-        var runStart = -1
-        var lastHit = -1
-        var y = y0
-        while (y <= y1) {
-            var cnt = 0
-            var x = x0
-            while (x <= x1) {
-                if (isRed(b.getPixel(x, y))) cnt++
-                x++
-            }
-            if (cnt >= 3) {
-                if (runStart < 0) runStart = y
-                lastHit = y
-            } else if (runStart >= 0 && y - lastHit > 6) {
-                break
-            }
-            y++
-        }
-        if (runStart < 0 || lastHit - runStart < 8) return null
-        return ((runStart + lastHit) / 2f) / b.height
-    }
-
-    /** Listeyi parmakla surukler. delta: icerigin ekran yuksekligine gore kayma miktari (eksi = yukari). */
-    private fun dragList(delta: Float) {
-        refreshScreen()
-        val x = pt("map1").first * screenW
-        val y0 = (0.45f - delta / 2f) * screenH
-        val y1 = (0.45f + delta / 2f) * screenH
-        val xi = x.toInt().toString()
-        if (shizukuReady() &&
-            shell(arrayOf("input", "swipe", xi, y0.toInt().toString(), xi, y1.toInt().toString(), "900"))
-        ) {
-            return
-        }
-        val p = Path()
-        p.moveTo(x, y0)
-        p.lineTo(x, y1)
-        runGesture(p, 900L)
-    }
-
-    /** Haritada Raklion 1/2/3 satirlari gorunene kadar listeyi kaydirir ve satir konumlarini hesaplar. */
-    private fun prepareList() {
-        say("Harita listesi kaydiriliyor")
-        for (i in 0 until 14) {
-            val b = grab()
-            if (b == null) continue
-            val a = findSwampY(b)
-            if (a == null) {
-                dragList(if (i < 7) -0.22f else 0.22f)
-                pause(1000)
-                continue
-            }
-            if (a < 0.36f || a > 0.64f) {
-                dragList((0.50f - a).coerceIn(-0.25f, 0.25f))
-                pause(1000)
-                continue
-            }
-            val r3 = a - SWAMP_GAP
-            listYs[3] = r3
-            listYs[2] = r3 - ROW_STEP
-            listYs[1] = r3 - 2 * ROW_STEP
-            return
-        }
-        fail("Harita listesinde Raklion bulunamadi (liste kaydirilamadi)")
-    }
-
-    private fun tapMapRow(m: Int) {
-        tapFrac(pt("map1").first, listYs[m])
-    }
-
     // ------------------------------------------------------------------ dokunma
 
     private fun tapPx(x: Float, y: Float): Boolean {
@@ -433,14 +381,14 @@ class BotService : AccessibilityService() {
         return false
     }
 
-    private fun tapFrac(fx: Float, fy: Float) {
+    private fun tapFrac(fx: Float, fy: Float): Boolean {
         refreshScreen()
-        tapPx(fx * screenW, fy * screenH)
+        return tapPx(fx * screenW, fy * screenH)
     }
 
-    private fun tapPoint(name: String) {
+    private fun tapPoint(name: String): Boolean {
         val p = pt(name)
-        tapFrac(p.first, p.second)
+        return tapFrac(p.first, p.second)
     }
 
     // ------------------------------------------------------------------ bot adimlari
@@ -465,7 +413,6 @@ class BotService : AccessibilityService() {
             }
         }
         if (!ok) fail("Harita acilamadi. 'Ayar' ile minimap ve closeMap noktalarini kontrol et.")
-        prepareList()
     }
 
     private fun closeMapIfOpen() {
@@ -494,90 +441,251 @@ class BotService : AccessibilityService() {
     }
 
     /** Bu kanalda canli boss varsa harita numarasini (1..3) dondurur, yoksa 0. Canliysa harita acik kalir. */
-    private fun scanLine(line: Int): Int {
-        say("Kanal " + line + " taraniyor")
+    private fun scanBoss(line: Int, mapNo: Int, bossPoint: Int): Boolean {
+        val bossLabel = if (mapNo == 2) "Raklion 2 tek boss" else if (bossPoint == 1) "Raklion 1 boss 1" else "Raklion 1 boss 2"
+        say("Kanal " + line + " / " + bossLabel + " kontrol ediliyor")
+        // Chat koordinatiyla zaten hedef Raklion haritasindayiz; harita listesinden satir
+        // secmek/kaydirma hem gereksiz hem de Random dugmesinin yerini etkileyebilir.
         openMap()
-        for (m in 1..3) {
-            tapMapRow(m)
-            pause(1200)
-            val b = grab() ?: continue
-            if (bossAlive(b, m)) {
-                say("Kanal " + line + " / Raklion " + m + ": boss CANLI")
-                return m
-            }
-        }
-        closeMapIfOpen()
-        return 0
+        pause(350)
+        val b = grab()
+        val alive = b != null && bossAlive(b, bossPoint)
+        if (!alive) closeMapIfOpen()
+        return alive
     }
 
-    private fun fightBoss(m: Int) {
-        val bp = pt("boss" + m)
-        tapFrac(bp.first, bp.second + ICON_DY)
-        pause(1200)
-        if (mapOpen()) {
-            tapPoint("closeMap")
-            pause(800)
+    private fun isGreen(c: Int): Boolean {
+        val r = Color.red(c); val g = Color.green(c); val b = Color.blue(c)
+        return r < 120 && g > 170 && b < 120 && g - r > 80
+    }
+
+    private fun cursorAtBoss(b: Bitmap, m: Int): Boolean {
+        val p = pt("boss" + m)
+        val cx = p.first * b.width
+        val cy = (p.second + ICON_DY) * b.height
+        val x0 = maxOf(0, (cx - 0.015f * b.width).toInt())
+        val x1 = minOf(b.width - 1, (cx + 0.015f * b.width).toInt())
+        val y0 = maxOf(0, (cy - 0.020f * b.height).toInt())
+        val y1 = minOf(b.height - 1, (cy + 0.020f * b.height).toInt())
+        var green = 0
+        var total = 0
+        for (y in y0..y1 step 2) for (x in x0..x1 step 2) {
+            total++
+            if (isGreen(b.getPixel(x, y))) green++
         }
-        say("Raklion " + m + " boss'una yuruyor")
-        pause(WALK_OPTIONS[walkIdx] * 1000)
+        return total > 0 && green.toFloat() / total >= 0.003f
+    }
+
+    private fun miniBossAlive(b: Bitmap): Boolean {
+        // Boss simgesi mini haritanin sol-orta bolgesinde. Yesil oyuncu imleci
+        // ve mini harita disindaki arayuz pikselleri olcum alanina dahil edilmez.
+        val a = pt("miniTL"); val c = pt("miniBR")
+        val x0 = maxOf(0, (a.first * b.width).toInt())
+        val x1 = minOf(b.width - 1, (c.first * b.width).toInt())
+        val y0 = maxOf(0, (a.second * b.height).toInt())
+        val y1 = minOf(b.height - 1, (c.second * b.height).toInt())
+        if (x1 <= x0 || y1 <= y0) return false
+        var red = 0
+        var grayOrBrown = 0
+        var total = 0
+        for (y in y0..y1 step 2) for (x in x0..x1 step 2) {
+            val color = b.getPixel(x, y)
+            val r = Color.red(color); val g = Color.green(color); val bl = Color.blue(color)
+            total++
+            if (isRed(color) || (r > 150 && g in 35..150 && bl < 100 && r - bl > 65)) red++
+            if (r in 70..190 && g in 65..175 && bl in 45..135 && kotlin.math.abs(r - g) < 65) grayOrBrown++
+        }
+        // Live is only confirmed by red/orange boss pixels; absence of red is not proof of death.
+        // Death verification itself compares multiple samples in fightBoss.
+        return total > 0 && red.toFloat() / total >= 0.00035f
+    }
+
+    private fun fightBoss(bossPoint: Int, mapNo: Int) {
+        // Harita açıkken Random ışınlan; boss simgesine tıkla ve imlecin simgeye gelmesini bekle.
+        val bossLabel = if (mapNo == 2) "Raklion 2 tek boss" else if (bossPoint == 1) "Raklion 1 boss 1" else "Raklion 1 boss 2"
+        say(bossLabel + ": Random düğmesine basılıyor")
+        val sentBeforeRandom = sent
+        tapPoint("random")
+        pause(2500)
+
+        // Goldingen'deki çalışan akış gibi Random'dan sonra haritanın durumunu yeniden
+        // kontrol et. Harita kapanmışsa tekrar açmadan boss koordinatına dokunma.
+        if (!mapOpen()) {
+            say("Random sonrası harita kapandı; tekrar açılıyor")
+            openMap()
+            pause(700)
+        }
+        if (sent == sentBeforeRandom) {
+            say("Random dokunuşu gönderilemedi; nokta ayarını kontrol et")
+            closeMapIfOpen()
+            return
+        }
+        val bp = pt("boss" + bossPoint)
+        say("Random sonrası boss işaretine dokunuluyor")
+        tapFrac(bp.first, bp.second + ICON_DY)
+        pause(700)
+        say("Boss simgesine doğru ilerleniyor")
+        val walkStart = System.currentTimeMillis()
+        var arrivedChecks = 0
+        while (running && System.currentTimeMillis() - walkStart < 60000L) {
+            pause(1200)
+            val shot = grab()
+            if (shot != null && cursorAtBoss(shot, bossPoint)) arrivedChecks++ else arrivedChecks = 0
+            if (arrivedChecks >= 2) break
+        }
+        if (arrivedChecks < 2) {
+            closeMapIfOpen()
+            say("Boss konumuna varış doğrulanamadı; saldırı başlatılmadı")
+            return
+        }
+        if (mapOpen()) { tapPoint("closeMap"); pause(700) }
         tapPoint("manual")
-        say("Oto saldiri acildi, boss izleniyor")
+        say("Oto saldırı açık; mini harita izleniyor")
         val t0 = System.currentTimeMillis()
+        var faded = 0
         while (running) {
             pause(RECHECK_SEC * 1000)
-            openMap()
-            tapMapRow(m)
-            pause(1200)
             val b = grab()
-            val alive = b != null && bossAlive(b, m)
-            closeMapIfOpen()
-            if (!alive) {
-                say("Boss oldu")
-                break
+            if (b != null) {
+                if (miniBossAlive(b)) faded = 0 else faded++
+                if (faded >= 2) { say("Mini harita boss simgesi soldu; boss öldü"); break }
             }
             if (System.currentTimeMillis() - t0 > FIGHT_TIMEOUT_SEC * 1000L) {
-                say("Zaman asimi, boss'tan vazgecildi")
-                break
+                say("Savaş zaman aşımı; sonraki kanala geçiliyor"); break
             }
         }
         tapPoint("manual")
-        pause(800)
+        pause(600)
+    }
+
+    private fun goByChat(point: String) {
+        // Raklion gecisi yalnizca sohbet icindeki koordinat baglantisiyla yapilir.
+        // Merkez varsayilanlari gercek koordinat degildir; nokta kullanici tarafindan kalibre edilmeli.
+        if (!prefs().contains(point + "_x") || !prefs().contains(point + "_y")) {
+            fail("Işınlanma noktası ayarlanmamış: " + point + ". Ayarlar > " + point + " ile sohbet içindeki koordinat bağlantısına dokun.")
+        }
+        if (!tapPoint("chat")) fail("Chat açılamadı: dokunuş gönderilemedi.")
+        pause(900)
+        val before = grab() ?: fail("Chat açıldı mı kontrol edilemiyor; ekran görüntüsü alınamadı.")
+        if (!tapPoint(point)) fail("Chat koordinatına dokunuş gönderilemedi: " + point)
+        pause(2500)
+        val after = grab() ?: fail("Işınlanma kontrolü yapılamadı; ekran görüntüsü alınamadı.")
+        // Hedefe tıklandıktan sonra chat kapatılır; harita/kanal kontrolleri bir sonraki adımda yapılır.
+        tapPoint("closeChat")
+        pause(700)
+        say("Chat koordinatı seçildi (" + point + "); geçişin oyun içinde tamamlandığı ayrıca kontrol edilmeli.")
+    }
+
+    private fun readAtkDef(b: Bitmap): Pair<Int, Int>? {
+        return try {
+            val w = (0.27f * b.width).toInt()
+            val h = (0.07f * b.height).toInt()
+            val crop = Bitmap.createBitmap(b, 0, 0, w, h)
+            val big = Bitmap.createScaledBitmap(crop, w * 3, h * 3, true)
+            val result = Tasks.await(recognizer.process(InputImage.fromBitmap(big, 0)), 8, TimeUnit.SECONDS)
+            lastOcr = result.text.replace("\\n", " ")
+            val normalized = result.text.replace(Regex("[\\s,.]"), "")
+            val values = Regex("\\d{3,6}").findAll(normalized).mapNotNull { it.value.toIntOrNull() }.toList()
+            crop.recycle(); big.recycle()
+            if (values.size >= 2) Pair(values[0], values[1]) else null
+        } catch (e: Exception) { lastOcr = e.message ?: "OCR hatasi"; null }
+    }
+
+    private fun goBuffIfNeeded(returnMapNo: Int, returnLine: Int) {
+        if (!prefs().getBoolean("cfg_buffOn", false)) { say("Buff kapali; boss dongusu devam ediyor"); return }
+        val shot = grab() ?: run { say("Buff kontrolu: ekran goruntusu yok"); return }
+        val values = readAtkDef(shot)
+        if (values == null) { say("ATK/DEF okunamadi; buff karari verilmedi: " + lastOcr); return }
+        val minAtk = prefs().getInt("cfg_minAtk", 0)
+        val minDef = prefs().getInt("cfg_minDef", 0)
+        val need = (minAtk > 0 && values.first < minAtk) || (minDef > 0 && values.second < minDef)
+        say("ATK " + values.first + " / DEF " + values.second + if (need) " — buff gerekiyor" else " — buff yeterli")
+        if (!need) return
+
+        // Buff noktasi yalnizca 1. kanalda: once kanal 1, sonra chat koordinati.
+        if (returnLine != 1) switchLine(1)
+        say("Buff konumuna gidiliyor (Kanal 1)")
+        goByChat("buffLink")
+        pause(4000)
+        val afterBuff = grab()?.let { readAtkDef(it) }
+        if (afterBuff != null) say("Buff sonrasi ATK " + afterBuff.first + " / DEF " + afterBuff.second)
+        else say("Buff sonrasi ATK/DEF okunamadi")
+
+        // Buff bitince ayni harita/kanaldaki rotaya geri don.
+        goByChat(if (returnMapNo == 2) "chatMap2" else "chatMap1")
+        if (returnLine != 1) switchLine(returnLine)
     }
 
     private fun runLoop() {
-        var line = startLine
-        var needSwitch = false
+        var line = 1
+        var mapPos = 0 // Raklion 2 (tek boss), sonra Raklion 1 (iki boss)
+        goByChat("chatMap2")
+        switchLine(1)
+        goBuffIfNeeded(returnMapNo = 2, returnLine = 1)
         while (running) {
-            if (needSwitch) switchLine(line)
-            needSwitch = true
-            val m = scanLine(line)
-            if (m > 0) {
-                fightBoss(m)
-                needSwitch = false
+            if (mapPos == 0) {
+                // Raklion 2: her kanalda yalnizca bir boss
+                if (scanBoss(line, 2, 2)) {
+                    fightBoss(bossPoint = 2, mapNo = 2)
+                    goBuffIfNeeded(returnMapNo = 2, returnLine = line)
+                }
             } else {
-                line = line % 3 + 1
+                // Raklion 1: ayni kanalda iki ayri boss ismi/konumu kontrol edilir
+                for (bossPoint in listOf(1, 3)) {
+                    if (!running) break
+                    if (scanBoss(line, 1, bossPoint)) {
+                        fightBoss(bossPoint = bossPoint, mapNo = 1)
+                        goBuffIfNeeded(returnMapNo = 1, returnLine = line)
+                    }
+                }
+            }
+            if (line < 3) {
+                line++
+                switchLine(line)
+            } else {
+                line = 1
+                mapPos = (mapPos + 1) % 2
+                goByChat(if (mapPos == 0) "chatMap2" else "chatMap1")
+                switchLine(1)
             }
         }
     }
 
     private fun start() {
-        if (running) return
-        if (worker?.isAlive == true) {
-            say("Onceki islem bitiyor, biraz bekle")
+        if (running) {
+            say("Otomasyon zaten çalışıyor.")
             return
         }
+        if (worker?.isAlive == true) {
+            say("Önceki işlem kapanıyor; 1-2 saniye sonra tekrar dene.")
+            return
+        }
+
+        // Never fail silently on the first click: Raklion 2 chat target must be calibrated.
+        val p = prefs()
+        if (!p.contains("chatMap2_x") || !p.contains("chatMap2_y")) {
+            val msg = "Başlatılamadı: Ayar > chatMap2 seç, oyunda sohbet içindeki Raklion 2 koordinatına dokun. Sonra yeniden başlat."
+            say(msg)
+            ui { Toast.makeText(this, msg, Toast.LENGTH_LONG).show() }
+            return
+        }
+
         running = true
+        say("Başlatılıyor: Raklion 2 / Kanal 1...")
         updateUi()
         val t = Thread {
             try {
                 runLoop()
             } catch (e: StopEx) {
+                // fail() already places the precise reason in the floating status.
             } catch (e: InterruptedException) {
+                if (running) say("İşlem beklenmedik şekilde kesildi.")
             } catch (e: Exception) {
-                say("Hata: " + e.message)
+                say("Hata: " + (e.message ?: e.javaClass.simpleName))
+            } finally {
+                running = false
+                ui { updateUi() }
             }
-            running = false
-            ui { updateUi() }
         }
         worker = t
         t.start()
@@ -595,9 +703,7 @@ class BotService : AccessibilityService() {
     }
 
     private fun updateUi() {
-        startBtn?.text = if (running) "■ Durdur" else "▶ Baslat"
-        lineBtn?.text = "Baslangic kanali: " + startLine
-        walkBtn?.text = "Yuruyus suresi: " + WALK_OPTIONS[walkIdx] + " sn"
+        startBtn?.text = if (running) "■  DÖNGÜYÜ DURDUR" else "▶  BOSS DÖNGÜSÜNÜ BAŞLAT"
     }
 
     // ------------------------------------------------------------------ test
@@ -656,62 +762,92 @@ class BotService : AccessibilityService() {
         b.textSize = 12f
         b.isAllCaps = false
         b.setTextColor(Color.WHITE)
-        b.setPadding(dp(8), 0, dp(8), 0)
+        b.setPadding(dp(10), dp(3), dp(10), dp(3))
         b.minHeight = 0
         b.minimumHeight = 0
         b.minWidth = 0
         b.minimumWidth = 0
         val bg = GradientDrawable()
-        bg.setColor(0xCC222222.toInt())
-        bg.cornerRadius = dp(6).toFloat()
+        bg.setColor(0xFF2A394F.toInt())
+        bg.cornerRadius = dp(8).toFloat()
+        bg.setStroke(dp(1), 0xFF43546C.toInt())
         b.background = bg
         b.setOnClickListener { onClick() }
         return b
     }
 
     private fun addBtn(col: LinearLayout, btn: Button) {
-        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(34))
-        lp.topMargin = dp(3)
+        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(38))
+        lp.topMargin = dp(4)
         col.addView(btn, lp)
     }
 
     private fun buildPanel() {
         val col = LinearLayout(this)
         col.orientation = LinearLayout.VERTICAL
+        col.setPadding(dp(10), dp(8), dp(10), dp(10))
+        val shell = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xF2222D40.toInt(), 0xF2141B29.toInt()))
+        shell.cornerRadius = dp(16).toFloat()
+        shell.setStroke(dp(1), 0xFFE3AF43.toInt())
+        col.background = shell
+        col.elevation = dp(10).toFloat()
+        col.minimumWidth = dp(158)
 
         val st = TextView(this)
         st.textSize = 11f
         st.setTextColor(Color.WHITE)
-        st.setBackgroundColor(0xAA000000.toInt())
-        st.setPadding(dp(4), dp(2), dp(4), dp(2))
-        st.text = "Hazir"
+        st.setTextColor(0xFFE8EDF5.toInt())
+        val statusBg = GradientDrawable()
+        statusBg.setColor(0xFF26364B.toInt())
+        statusBg.cornerRadius = dp(8).toFloat()
+        st.background = statusBg
+        st.setPadding(dp(8), dp(7), dp(8), dp(7))
+        st.text = "● Hazir"
         st.maxWidth = dp(260)
         statusView = st
         col.addView(st)
 
-        val sb = mkBtn("▶ Baslat") { toggle() }
+        val sb = mkBtn("▶  BOSS DÖNGÜSÜNÜ BAŞLAT") { toggle() }
+        val startBg = GradientDrawable()
+        startBg.setColor(0xFF176B59.toInt())
+        startBg.cornerRadius = dp(9).toFloat()
+        sb.background = startBg
+        sb.setPadding(dp(10), 0, dp(10), 0)
         startBtn = sb
         addBtn(col, sb)
+        panelButtons.add(sb)
 
-        val lb = mkBtn("Baslangic kanali: 1") {
-            startLine = startLine % 3 + 1
-            updateUi()
+        val sh = mkBtn("Shizuku izni") { shizukuAsk() }; addBtn(col, sh); panelButtons.add(sh)
+        val tt = mkBtn("Tik testi") { tapTest() }; addBtn(col, tt); panelButtons.add(tt)
+        val ts = mkBtn("Test") { runTest() }; addBtn(col, ts); panelButtons.add(ts)
+        val ay = mkBtn("Ayar") { toggleMenu() }; addBtn(col, ay); panelButtons.add(ay)
+
+        val header = LinearLayout(this)
+        header.orientation = LinearLayout.HORIZONTAL
+        header.gravity = Gravity.CENTER_VERTICAL
+        val title = TextView(this)
+        title.text = "BOSSINGEN  •  ROTASYON"
+        title.textSize = 12f
+        title.setTypeface(null, android.graphics.Typeface.BOLD)
+        title.setTextColor(0xFFF5C45E.toInt())
+        title.setPadding(dp(2), dp(4), dp(10), dp(6))
+        header.addView(title, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        lateinit var minimize: Button
+        minimize = mkBtn("—") {
+            compact = !compact
+            for (v in panelButtons) v.visibility = if (compact) View.GONE else View.VISIBLE
+            minimize.text = if (compact) "+" else "—"
         }
-        lineBtn = lb
-        addBtn(col, lb)
-
-        val wb = mkBtn("Yuruyus suresi") {
-            walkIdx = (walkIdx + 1) % WALK_OPTIONS.size
-            updateUi()
+        header.addView(minimize)
+        col.addView(header, 0)
+        header.setOnTouchListener { _, ev ->
+            val params = panelParams
+            when (ev.action) {
+                MotionEvent.ACTION_DOWN -> { dragStartX = ev.rawX; dragStartY = ev.rawY; dragOrigX = params?.x ?: 0; dragOrigY = params?.y ?: 0; true }
+                MotionEvent.ACTION_MOVE -> { if (params != null) { params.x = dragOrigX + (ev.rawX - dragStartX).toInt(); params.y = dragOrigY + (ev.rawY - dragStartY).toInt(); try { wm.updateViewLayout(col, params) } catch (_: Exception) {} }; true }
+                else -> true
+            }
         }
-        walkBtn = wb
-        addBtn(col, wb)
-
-        addBtn(col, mkBtn("Shizuku izni") { shizukuAsk() })
-        addBtn(col, mkBtn("Tik testi") { tapTest() })
-        addBtn(col, mkBtn("Test") { runTest() })
-        addBtn(col, mkBtn("Ayar") { toggleMenu() })
-
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -721,7 +857,8 @@ class BotService : AccessibilityService() {
         )
         lp.gravity = Gravity.TOP or Gravity.START
         lp.x = 0
-        lp.y = (screenH * 0.50f).toInt()
+        lp.y = (screenH * 0.35f).toInt()
+        panelParams = lp
         wm.addView(col, lp)
         panel = col
         updateUi()
@@ -735,11 +872,34 @@ class BotService : AccessibilityService() {
             } catch (e: Exception) {
             }
             menu = null
+            menuParams = menuParams
             return
         }
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+        root.setPadding(dp(8), dp(6), dp(8), dp(8))
+        val menuBg = GradientDrawable()
+        menuBg.setColor(0xEE101722.toInt())
+        menuBg.cornerRadius = dp(12).toFloat()
+        menuBg.setStroke(dp(1), 0xFF53657C.toInt())
+        root.background = menuBg
+
+        val header = LinearLayout(this)
+        header.orientation = LinearLayout.HORIZONTAL
+        header.gravity = Gravity.CENTER_VERTICAL
+        val title = TextView(this)
+        title.text = "AYAR NOKTALARI  •  SÜRÜKLE"
+        title.textSize = 12f
+        title.setTypeface(null, android.graphics.Typeface.BOLD)
+        title.setTextColor(0xFFF5C45E.toInt())
+        title.setPadding(dp(6), dp(8), dp(12), dp(8))
+        header.addView(title, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        val close = mkBtn("✕") { toggleMenu() }
+        header.addView(close)
+        root.addView(header)
+
         val row = LinearLayout(this)
         row.orientation = LinearLayout.HORIZONTAL
-        row.setBackgroundColor(0xAA000000.toInt())
         val left = LinearLayout(this)
         left.orientation = LinearLayout.VERTICAL
         val right = LinearLayout(this)
@@ -754,6 +914,7 @@ class BotService : AccessibilityService() {
         addBtn(right, mkBtn("Menuyu kapat") { toggleMenu() })
         row.addView(left)
         row.addView(right)
+        root.addView(row)
 
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -763,10 +924,29 @@ class BotService : AccessibilityService() {
             PixelFormat.TRANSLUCENT
         )
         lp.gravity = Gravity.TOP or Gravity.START
-        lp.x = dp(200)
-        lp.y = dp(10)
-        wm.addView(row, lp)
-        menu = row
+        lp.x = menuParams?.x ?: dp(200)
+        lp.y = menuParams?.y ?: dp(10)
+        header.setOnTouchListener { _, ev ->
+            when (ev.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    menuDragStartX = ev.rawX
+                    menuDragStartY = ev.rawY
+                    menuDragOrigX = lp.x
+                    menuDragOrigY = lp.y
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    lp.x = menuDragOrigX + (ev.rawX - menuDragStartX).toInt()
+                    lp.y = menuDragOrigY + (ev.rawY - menuDragStartY).toInt()
+                    try { wm.updateViewLayout(root, lp) } catch (_: Exception) {}
+                    true
+                }
+                else -> true
+            }
+        }
+        menuParams = lp
+        wm.addView(root, lp)
+        menu = root
     }
 
     private fun removeExtra() {
