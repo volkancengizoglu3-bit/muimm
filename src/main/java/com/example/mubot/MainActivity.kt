@@ -59,6 +59,7 @@ class MainActivity : Activity() {
     private lateinit var stopAuto: Switch
     private lateinit var randomOn: Switch
     private lateinit var reviveOn: Switch
+    private val mapSw = HashMap<Int, Switch>()
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
@@ -127,6 +128,23 @@ class MainActivity : Activity() {
         stopAuto.isChecked = prefs().getBoolean("cfg_stopAuto", true)
         hunt.addView(stopAuto, lp(dp(10)))
 
+        // raklion haritalari karti
+        val maps = card(col, "Raklion haritaları")
+        val mapHint = TextView(this)
+        mapHint.text = "Kapalı harita rotada atlanır, bot uğramadan sıradakine geçer."
+        mapHint.textSize = 11f
+        mapHint.setTextColor(DIM)
+        maps.addView(mapHint)
+        for (mi in listOf(1, 2, 3)) {
+            val sw = Switch(this)
+            sw.text = "Raklion " + mi + (if (mi == 3) " (Selupan)" else "")
+            sw.setTextColor(Color.WHITE)
+            sw.textSize = 14f
+            sw.isChecked = prefs().getBoolean("cfg_mapOn" + mi, true)
+            maps.addView(sw, lp(dp(8)))
+            mapSw[mi] = sw
+        }
+
         // olum karti
         val dead = card(col, "Ölüm")
         reviveOn = Switch(this)
@@ -162,6 +180,7 @@ class MainActivity : Activity() {
             e.putBoolean("cfg_stopAuto", stopAuto.isChecked)
             e.putBoolean("cfg_randomOn", randomOn.isChecked)
             e.putBoolean("cfg_reviveOn", reviveOn.isChecked)
+            for ((mi, sw) in mapSw) e.putBoolean("cfg_mapOn" + mi, sw.isChecked)
             e.apply()
             Toast.makeText(this, "Kaydedildi", Toast.LENGTH_SHORT).show()
         }

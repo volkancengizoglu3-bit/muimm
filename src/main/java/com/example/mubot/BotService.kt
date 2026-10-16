@@ -850,10 +850,22 @@ class BotService : AccessibilityService() {
         val r = ROUTE[step]
         val m = r.first
         val line = r.second
+        if (!cfgB("mapOn" + m, true)) {
+            if (!cfgB("mapOn1", true) && !cfgB("mapOn2", true) && !cfgB("mapOn3", true)) {
+                fail("Tüm haritalar kapalı. Ayar ekranından en az birini aç")
+            }
+            say("Raklion " + m + " kapalı, atlanıyor")
+            advanceStep()
+            return
+        }
         say(routeName(step) + " adımı")
         gotoSpot(m, line)
         if (cfgB("buffOn", true)) checkBuff()
         huntHere(m, line)
+        advanceStep()
+    }
+
+    private fun advanceStep() {
         step = (step + 1) % ROUTE.size
         if (step == 0) {
             laps++
@@ -867,6 +879,7 @@ class BotService : AccessibilityService() {
         var noMe = 0
         var tries = 0
         var verifyEmpty = 0
+        var waited = false
         while (running) {
             if (curMap != m || curLine != line) gotoSpot(m, line)
             val b = ensureMap()
@@ -875,18 +888,35 @@ class BotService : AccessibilityService() {
             val t = readTitle(b)
             val pm = t.first
             val pl = t.second
-            val mismatch = (pm != null && pm != m) || (pl != null && pl != line)
-            if (mismatch) {
-                if (fixes < 2) {
+            val mapBad = pm != null && pm != m
+            val lineBad = pl != null && pl != line
+            if (mapBad || lineBad) {
+                if (!waited) {
+                    // harita hala yukleniyor olabilir: once biraz bekle, tekrar oku
+                    waited = true
+                    say("Başlık: Raklion " + pm + " / kanal " + pl + ", yükleniyor olabilir, bekleniyor")
+                    closeMapIfOpen()
+                    pause(5000)
+                    continue
+                }
+                if (fixes < 3) {
                     fixes++
-                    say("Başlık okundu: Raklion " + pm + " / kanal " + pl + ", düzeltiliyor")
+                    say("Başlık okundu: Raklion " + pm + " / kanal " + pl + ", yeniden gidiliyor")
                     if (pm != null) curMap = pm
                     if (pl != null) curLine = pl
                     closeMapIfOpen()
                     continue
                 }
-                // iki denemede de uymadi: OCR yanlis okuyor olabilir, hedefteymisiz gibi devam et
-                say("Başlık hâlâ uyuşmuyor, okuma hatası sayılıp devam ediliyor")
+                if (mapBad) {
+                    // yanlis haritada av yapma: bu adimi atla
+                    say(
+                        "Raklion " + m + " haritasına ışınlanılamadı (başlık: Raklion " + pm +
+                            "), atlandı. Chat'teki linkR" + m + " noktasını kontrol et"
+                    )
+                    closeMapIfOpen()
+                    return
+                }
+                say("Kanal başlığı uyuşmuyor, okuma hatası sayılıp devam ediliyor")
             } else {
                 if (pm != null) curMap = pm
                 if (pl != null) curLine = pl
