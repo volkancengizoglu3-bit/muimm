@@ -39,7 +39,7 @@ import rikka.shizuku.Shizuku
 /**
  * MU Immortal - Raklion kirmizi boss avi.
  *
- * Rota: Raklion 2 (kanal 1,2,3) -> Raklion 1 (kanal 1,2,3) -> basa don.
+ * Rota: Raklion 2, Raklion 1, Raklion 3 (her birinde kanal 1,2,3) -> basa don.
  *
  * Her adimda:
  *  1) (buff acik ise) ATK ve DEF okunur; ikisi de minimumun altindaysa buff noktasina gidilir.
@@ -94,7 +94,7 @@ class BotService : AccessibilityService() {
         val NAMES = listOf(
             "minimap", "closeMap", "random", "autoAtk", "miniTL", "miniBR",
             "wire", "ch1", "ch2", "ch3", "switchLine", "closeChannel",
-            "chat", "chatTab", "linkR1", "linkR2", "buffLink", "closeChat", "revive"
+            "chat", "chatTab", "linkR1", "linkR2", "linkR3", "buffLink", "closeChat", "revive"
         )
 
         val LABELS = mapOf(
@@ -114,6 +114,7 @@ class BotService : AccessibilityService() {
             "chatTab" to "Chat'te koordinatların durduğu sekme",
             "linkR1" to "Chat'te Raklion 1 başlangıç noktasının bağlantısı",
             "linkR2" to "Chat'te Raklion 2 başlangıç noktasının bağlantısı",
+            "linkR3" to "Chat'te Raklion 3 başlangıç noktasının bağlantısı",
             "buffLink" to "Chat'te buff noktasının bağlantısı",
             "closeChat" to "Chat'i kapatma (isteğe bağlı)",
             "revive" to "Ölüm ekranında Free Revival düğmesi (ölüm ekranı açıkken işaretle)"
@@ -138,13 +139,15 @@ class BotService : AccessibilityService() {
         // Rota: (harita, kanal)
         val ROUTE = listOf(
             Pair(2, 1), Pair(2, 2), Pair(2, 3),
-            Pair(1, 1), Pair(1, 2), Pair(1, 3)
+            Pair(1, 1), Pair(1, 2), Pair(1, 3),
+            Pair(3, 1), Pair(3, 2), Pair(3, 3)
         )
 
         // Haritalardaki boss dogma noktalari (ekran orani): sayac anahtari icin kullanilir
         val SPAWNS = mapOf(
             1 to listOf(Pair(0.470f, 0.461f), Pair(0.506f, 0.600f)),
-            2 to listOf(Pair(0.612f, 0.542f))
+            2 to listOf(Pair(0.612f, 0.542f)),
+            3 to listOf(Pair(0.491f, 0.563f))
         )
 
         // harita cizim alani (ekran orani). Sol liste ve Random/yakinlastirma cubugu disarida kalir.
@@ -187,6 +190,7 @@ class BotService : AccessibilityService() {
     private var kills = 0
     private var killsR1 = 0
     private var killsR2 = 0
+    private var killsR3 = 0
     private var deaths = 0
     private var buffs = 0
     private var randoms = 0
@@ -245,7 +249,7 @@ class BotService : AccessibilityService() {
     private fun say(msg: String) {
         ui {
             statusView?.text = msg
-            statsView?.text = "Boss " + kills + " (R2 " + killsR2 + " · R1 " + killsR1 + ")  ·  Ölüm " +
+            statsView?.text = "Boss " + kills + " (R2 " + killsR2 + " · R1 " + killsR1 + " · R3 " + killsR3 + ")  ·  Ölüm " +
                 deaths + "  ·  Buff " + buffs + "  ·  Random " + randoms + "  ·  Tur " + laps
         }
     }
@@ -495,7 +499,7 @@ class BotService : AccessibilityService() {
             val ph = (maxY - minY + 1) * cell / s
             val area = n * cell * cell / (s * s)
             // boss ikonu ~48x60-72 piksel; yazi (yukseklik ~25) ve kucuk kirmizi noktalar elenir
-            if (pw >= 34 && pw <= 100 && ph >= 44 && ph <= 115 && area >= 900) {
+            if (pw >= 34 && pw <= 100 && ph >= 40 && ph <= 115 && area >= 750) {
                 bosses.add(
                     PointF(
                         x0 + (minX + maxX + 1) * cell / 2f,
@@ -764,7 +768,7 @@ class BotService : AccessibilityService() {
     /** "mm:ss" kalan sure, "HAZIR" (dogdu) veya "--" (bilinmiyor). */
     private fun timerText(m: Int, line: Int, idx: Int): String {
         val t = killAt[m.toString() + "_" + line + "_" + idx] ?: return "--"
-        val total = if (m == 1) cfgI("respR1", 2580) else cfgI("respR2", 2115)
+        val total = if (m == 1) cfgI("respR1", 2580) else if (m == 3) cfgI("respR3", 2160) else cfgI("respR2", 2115)
         val left = total - ((System.currentTimeMillis() - t) / 1000L).toInt()
         if (left <= 0) return "HAZIR"
         return String.format("%02d:%02d", left / 60, left % 60)
@@ -817,7 +821,7 @@ class BotService : AccessibilityService() {
         pause(1000)
         tapPoint("chatTab")
         pause(700)
-        tapPoint(if (m == 1) "linkR1" else "linkR2")
+        tapPoint("linkR" + m)
         pause(600)
         if (prefs().contains("closeChat_x")) {
             tapPoint("closeChat")
@@ -1045,7 +1049,7 @@ class BotService : AccessibilityService() {
         }
         if (killed) {
             kills++
-            if (m == 1) killsR1++ else killsR2++
+            if (m == 1) killsR1++ else if (m == 3) killsR3++ else killsR2++
             recordKill(m, line, spawnIndex(m, target))
             say("Boss öldü")
         }
@@ -1110,7 +1114,7 @@ class BotService : AccessibilityService() {
             return
         }
         val need = ArrayList<String>()
-        for (n in listOf("chat", "chatTab", "linkR1", "linkR2")) if (!hasPt(n)) need.add(n)
+        for (n in listOf("chat", "chatTab", "linkR1", "linkR2", "linkR3")) if (!hasPt(n)) need.add(n)
         if (cfgB("buffOn", true) && !hasPt("buffLink")) need.add("buffLink")
         if (need.isNotEmpty()) {
             say("Önce 'Ayar' menüsünden işaretle: " + need.joinToString(", "))
@@ -1333,7 +1337,7 @@ class BotService : AccessibilityService() {
         val stats = TextView(this)
         stats.textSize = 11f
         stats.setTextColor(TEXT_DIM)
-        stats.text = "Boss 0 (R2 0 · R1 0)  ·  Ölüm 0  ·  Buff 0  ·  Random 0  ·  Tur 0"
+        stats.text = "Boss 0 (R2 0 · R1 0 · R3 0)  ·  Ölüm 0  ·  Buff 0  ·  Random 0  ·  Tur 0"
         statsView = stats
         inner.addView(stats)
 

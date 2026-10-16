@@ -3,7 +3,7 @@
 MU Immortal Raklion kırmızı boss avı için Android otomasyon uygulaması.
 [Goldingen](https://github.com/volkancengizoglu3-bit/goldingen) ile aynı mantık, sarı yerine kırmızı bosslar için.
 
-- Rota: Raklion 2 kanal 1-2-3, sonra Raklion 1 kanal 1-2-3, sonra baştan.
+- Rota: Raklion 2, Raklion 1, Raklion 3 (Selupan); her birinde kanal 1-2-3, sonra baştan.
 - Haritada canlı boss ikonu (parlak kırmızı-turuncu alev) + yeşil oyuncu imleci okunur; ölü boss ikonu soluk olduğu için görünmez.
 - Canlı boss'a haritadan dokunulur, imleç ikona varınca harita kapanır ve oto saldırı açılır.
 - Boss ölümü sağ üstteki mini haritadan (ikon soluklaşınca) anlaşılır.

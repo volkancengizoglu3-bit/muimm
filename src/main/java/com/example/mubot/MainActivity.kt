@@ -37,7 +37,8 @@ class MainActivity : Activity() {
 
     private val respawnFields = listOf(
         Field("respR2", "Raklion 2 yeniden doğuş", "Saniye (35:15 = 2115)", "2115"),
-        Field("respR1", "Raklion 1 yeniden doğuş", "Saniye (43:00 = 2580)", "2580")
+        Field("respR1", "Raklion 1 yeniden doğuş", "Saniye (43:00 = 2580)", "2580"),
+        Field("respR3", "Raklion 3 yeniden doğuş (Selupan)", "Saniye (36:00 = 2160)", "2160")
     )
 
     private val buffFields = listOf(
@@ -100,11 +101,11 @@ class MainActivity : Activity() {
             "3  Aşağıdaki değerleri kaydet.\n" +
             "4  Chat'te Raklion 1 ve Raklion 2 başlangıç koordinatlarını ve buff noktasını " +
             "aynı sekmede görünür tut.\n" +
-            "5  Oyunda 'Ayar' ile kırmızı satırları işaretle (chat, chatTab, linkR1, linkR2, " +
+            "5  Oyunda 'Ayar' ile kırmızı satırları işaretle (chat, chatTab, linkR1, linkR2, linkR3, " +
             "buffLink, miniTL, miniBR; revive sadece ölüm seçeneğini açarsan).\n" +
             "6  Haritayı aç, 'Test'e bas: canlı boss sayısı ve imleç görünmeli.\n" +
             "7  'Başlangıç' düğmesiyle şu an bulunduğun harita/kanalı seç, '▶ Başlat'.\n\n" +
-            "Rota: Raklion 2 kanal 1-2-3, sonra Raklion 1 kanal 1-2-3, sonra baştan."
+            "Rota: Raklion 2, sonra Raklion 1, sonra Raklion 3; her birinde kanal 1-2-3, sonra baştan."
         setup.addView(steps)
         val acc = button("Erişilebilirlik ayarlarını aç", false)
         acc.setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
