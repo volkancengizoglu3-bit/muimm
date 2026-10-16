@@ -25,7 +25,7 @@ class MainActivity : Activity() {
     private class Field(val key: String, val label: String, val hint: String, val def: String, val decimal: Boolean = false)
 
     private val huntFields = listOf(
-        Field("radius", "Yarıçap", "Random ile oyuncu boss'a bu kadar yaklaşınca yürüme başlar (piksel)", "150"),
+        Field("radius", "Yarıçap", "Random ile oyuncu boss'a bu kadar yaklaşınca yürüme başlar (piksel). Oyun içi panelden de değişir", "200"),
         Field("randomWait", "Random sonrası bekleme", "Işınlanma yüklenirken beklenecek süre (sn)", "2.5", true),
         Field("randomMax", "Random deneme sınırı", "Bir boss için en fazla bu kadar Random; aşılırsa yürünür", "40"),
         Field("arrive", "Varış mesafesi", "İmleç boss ikonuna bu kadar yaklaşınca harita kapanır (piksel)", "45"),

@@ -166,6 +166,8 @@ class BotService : AccessibilityService() {
     private var statsView: TextView? = null
     private var startBtn: Button? = null
     private var routeBtn: Button? = null
+    private var radiusBtn: Button? = null
+    private var resumable = false
     private var dotView: View? = null
 
     private val ACCENT = 0xFFE5603D.toInt()
@@ -259,6 +261,9 @@ class BotService : AccessibilityService() {
     /** Eski surumdeki 'manual' noktasini yeni 'autoAtk' noktasina tasir. */
     private fun migratePrefs() {
         val p = prefs()
+        if (!p.getBoolean("mig_radius200", false)) {
+            p.edit().putString("cfg_radius", "200").putBoolean("mig_radius200", true).apply()
+        }
         if (!p.contains("autoAtk_x") && p.contains("manual_x")) {
             p.edit()
                 .putFloat("autoAtk_x", p.getFloat("manual_x", 0.972f))
@@ -917,7 +922,7 @@ class BotService : AccessibilityService() {
                 }
             }
             verifyEmpty = 0
-            val radius = cfgI("radius", 150).toFloat()
+            val radius = cfgI("radius", 200).toFloat()
             if (cfgB("randomOn", true) && bd > radius && tries < cfgI("randomMax", 40)) {
                 tries++
                 randoms++
@@ -1111,9 +1116,12 @@ class BotService : AccessibilityService() {
             say("Önce 'Ayar' menüsünden işaretle: " + need.joinToString(", "))
             return
         }
-        step = prefs().getInt("startIdx", 0).coerceIn(0, ROUTE.size - 1)
-        curMap = ROUTE[step].first
-        curLine = ROUTE[step].second
+        if (!resumable) {
+            step = prefs().getInt("startIdx", 0).coerceIn(0, ROUTE.size - 1)
+            curMap = ROUTE[step].first
+            curLine = ROUTE[step].second
+        }
+        resumable = true
         running = true
         updateUi()
         val t = Thread {
@@ -1134,7 +1142,7 @@ class BotService : AccessibilityService() {
     private fun stop() {
         running = false
         worker?.interrupt()
-        say("Durduruldu")
+        say("Duraklatıldı. ▶ Devam kaldığı yerden sürdürür")
         updateUi()
     }
 
@@ -1142,21 +1150,36 @@ class BotService : AccessibilityService() {
         if (running) stop() else start()
     }
 
+    private fun adjRadius(d: Int) {
+        val v = (cfgI("radius", 200) + d).coerceIn(25, 600)
+        prefs().edit().putString("cfg_radius", v.toString()).apply()
+        updateUi()
+    }
+
     private fun cycleStart() {
+        if (running) return
+        if (resumable) {
+            // ilk dokunus: kaldigi yeri birak, ayarli baslangictan basla
+            resumable = false
+            updateUi()
+            return
+        }
         val i = (prefs().getInt("startIdx", 0) + 1) % ROUTE.size
         prefs().edit().putInt("startIdx", i).apply()
+        resumable = false
         updateUi()
     }
 
     private fun updateUi() {
         val btn = startBtn
         if (btn != null) {
-            btn.text = if (running) "■  Durdur" else "▶  Başlat"
+            btn.text = if (running) "■  Duraklat" else if (resumable) "▶  Devam (R" + ROUTE[step].first + " · K" + ROUTE[step].second + ")" else "▶  Başlat"
             btn.background = rounded(if (running) BAD else ACCENT, 12)
             btn.setTextColor(Color.WHITE)
         }
         val si = prefs().getInt("startIdx", 0).coerceIn(0, ROUTE.size - 1)
-        routeBtn?.text = "Başlangıç: R" + ROUTE[si].first + " · K" + ROUTE[si].second
+        routeBtn?.text = (if (resumable) "Baştan başla: R" else "Başlangıç: R") + ROUTE[si].first + " · K" + ROUTE[si].second
+        radiusBtn?.text = "Yarıçap: " + cfgI("radius", 200) + " px"
         dotView?.background = oval(if (running) OK else ACCENT)
     }
 
@@ -1324,6 +1347,8 @@ class BotService : AccessibilityService() {
         routeBtn = rb
         addBtn(inner, rb, dp(36))
 
+        val rr = addRow(inner, listOf("−25", "Yarıçap", "+25"), listOf({ adjRadius(-25) }, { }, { adjRadius(25) }))
+        radiusBtn = rr[1]
         addRow(inner, listOf("Shizuku", "Test", "Ayar"), listOf({ shizukuAsk() }, { runTest() }, { toggleMenu() }))
         addRow(inner, listOf("Sayaçlar"), listOf({ toggleTimers() }))
         outer.addView(sv)
