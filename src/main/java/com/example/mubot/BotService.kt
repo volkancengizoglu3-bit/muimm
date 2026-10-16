@@ -92,7 +92,7 @@ class BotService : AccessibilityService() {
 
     companion object {
         val NAMES = listOf(
-            "minimap", "closeMap", "autoAtk", "miniTL", "miniBR",
+            "minimap", "closeMap", "random", "autoAtk", "miniTL", "miniBR",
             "wire", "ch1", "ch2", "ch3", "switchLine", "closeChannel",
             "chat", "chatTab", "linkR1", "linkR2", "buffLink", "closeChat", "revive"
         )
@@ -100,6 +100,7 @@ class BotService : AccessibilityService() {
         val LABELS = mapOf(
             "minimap" to "Sağ üstteki mini harita (haritayı açar)",
             "closeMap" to "Harita ekranı X (kapat) düğmesi",
+            "random" to "Haritadaki Random düğmesi (sağ alt)",
             "autoAtk" to "Oto saldırı (Auto / Manual) düğmesi",
             "miniTL" to "Mini haritanın SOL ÜST köşesi",
             "miniBR" to "Mini haritanın SAĞ ALT köşesi",
@@ -122,6 +123,7 @@ class BotService : AccessibilityService() {
         val DEFAULTS = mapOf(
             "minimap" to Pair(0.922f, 0.046f),
             "closeMap" to Pair(0.894f, 0.157f),
+            "random" to Pair(0.868f, 0.814f),
             "autoAtk" to Pair(0.972f, 0.473f),
             "miniTL" to Pair(0.865f, 0.012f),
             "miniBR" to Pair(0.985f, 0.190f),
@@ -185,6 +187,7 @@ class BotService : AccessibilityService() {
     private var killsR2 = 0
     private var deaths = 0
     private var buffs = 0
+    private var randoms = 0
     private var laps = 0
     private var lastShot = 0L
     private var screenW = 1
@@ -241,7 +244,7 @@ class BotService : AccessibilityService() {
         ui {
             statusView?.text = msg
             statsView?.text = "Boss " + kills + " (R2 " + killsR2 + " · R1 " + killsR1 + ")  ·  Ölüm " +
-                deaths + "  ·  Buff " + buffs + "  ·  Tur " + laps
+                deaths + "  ·  Buff " + buffs + "  ·  Random " + randoms + "  ·  Tur " + laps
         }
     }
 
@@ -853,6 +856,8 @@ class BotService : AccessibilityService() {
     private fun huntHere(m: Int, line: Int) {
         var fixes = 0
         var noMe = 0
+        var tries = 0
+        var verifyEmpty = 0
         while (running) {
             if (curMap != m || curLine != line) gotoSpot(m, line)
             val b = ensureMap()
@@ -892,6 +897,12 @@ class BotService : AccessibilityService() {
             }
             noMe = 0
             if (sc.bosses.isEmpty()) {
+                if (tries > 0 && verifyEmpty < 2) {
+                    // Random sonrasi harita yuklenirken bos gorunmus olabilir, tekrar bak
+                    verifyEmpty++
+                    pause(1500)
+                    continue
+                }
                 say("Raklion " + m + " kanal " + line + ": canlı boss yok")
                 closeMapIfOpen()
                 return
@@ -905,7 +916,21 @@ class BotService : AccessibilityService() {
                     best = s
                 }
             }
-            say("Raklion " + m + " kanal " + line + ": " + sc.bosses.size + " canlı boss")
+            verifyEmpty = 0
+            val radius = cfgI("radius", 150).toFloat()
+            if (cfgB("randomOn", true) && bd > radius && tries < cfgI("randomMax", 40)) {
+                tries++
+                randoms++
+                say(
+                    "Raklion " + m + " kanal " + line + ": en yakın boss " + bd.toInt() +
+                        " px uzakta (yarıçap " + radius.toInt() + "), Random " + tries
+                )
+                tapPoint("random")
+                pause((cfgF("randomWait", 2.5f) * 1000).toInt())
+                continue
+            }
+            say("Raklion " + m + " kanal " + line + ": " + sc.bosses.size + " canlı boss, " + bd.toInt() + " px")
+            tries = 0
             if (goAndFight(best, m, line)) {
                 if (cfgB("buffOn", true)) checkBuff()
             }
@@ -1265,6 +1290,13 @@ class BotService : AccessibilityService() {
 
         val inner = LinearLayout(this)
         inner.orientation = LinearLayout.VERTICAL
+        val sv = object : android.widget.ScrollView(this) {
+            override fun onMeasure(w: Int, h: Int) {
+                super.onMeasure(w, View.MeasureSpec.makeMeasureSpec((screenH * 0.55f).toInt(), View.MeasureSpec.AT_MOST))
+            }
+        }
+        sv.isVerticalScrollBarEnabled = false
+        sv.addView(inner)
 
         val st = TextView(this)
         st.textSize = 12f
@@ -1278,7 +1310,7 @@ class BotService : AccessibilityService() {
         val stats = TextView(this)
         stats.textSize = 11f
         stats.setTextColor(TEXT_DIM)
-        stats.text = "Boss 0 (R2 0 · R1 0)  ·  Ölüm 0  ·  Buff 0  ·  Tur 0"
+        stats.text = "Boss 0 (R2 0 · R1 0)  ·  Ölüm 0  ·  Buff 0  ·  Random 0  ·  Tur 0"
         statsView = stats
         inner.addView(stats)
 
@@ -1294,11 +1326,11 @@ class BotService : AccessibilityService() {
 
         addRow(inner, listOf("Shizuku", "Test", "Ayar"), listOf({ shizukuAsk() }, { runTest() }, { toggleMenu() }))
         addRow(inner, listOf("Sayaçlar"), listOf({ toggleTimers() }))
-        outer.addView(inner)
+        outer.addView(sv)
 
         hide.setOnClickListener {
-            val open = inner.visibility == View.VISIBLE
-            inner.visibility = if (open) View.GONE else View.VISIBLE
+            val open = sv.visibility == View.VISIBLE
+            sv.visibility = if (open) View.GONE else View.VISIBLE
             hide.text = if (open) "▸" else "▾"
         }
 
@@ -1308,7 +1340,43 @@ class BotService : AccessibilityService() {
         lp.y = (screenH * 0.18f).toInt()
         wm.addView(outer, lp)
         panel = outer
+        makeDraggable(title, outer)
         updateUi()
+    }
+
+    /** Basligi tutup surukleyerek paneli tasir. */
+    private fun makeDraggable(handle: View, target: View) {
+        var sx = 0f
+        var sy = 0f
+        var ox = 0
+        var oy = 0
+        handle.setOnTouchListener { _, ev ->
+            val lp = target.layoutParams as? WindowManager.LayoutParams
+            if (lp == null) {
+                false
+            } else {
+                when (ev.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        sx = ev.rawX
+                        sy = ev.rawY
+                        ox = lp.x
+                        oy = lp.y
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val dx = (ev.rawX - sx).toInt()
+                        val dy = (ev.rawY - sy).toInt()
+                        // gravity END olan panelde x ters yone artar
+                        lp.x = if ((lp.gravity and Gravity.END) == Gravity.END) ox - dx else ox + dx
+                        lp.y = oy + dy
+                        try {
+                            wm.updateViewLayout(target, lp)
+                        } catch (e: Exception) {
+                        }
+                    }
+                }
+                true
+            }
+        }
     }
 
     // ------------------------------------------------------------------ respawn sayac paneli
@@ -1389,6 +1457,7 @@ class BotService : AccessibilityService() {
         lp.y = (screenH * 0.25f).toInt()
         wm.addView(card, lp)
         timerPanel = card
+        makeDraggable(title, card)
         updateTimers()
         main.postDelayed(tick, 1000)
     }

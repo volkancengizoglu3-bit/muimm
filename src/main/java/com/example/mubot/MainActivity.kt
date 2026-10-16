@@ -25,6 +25,9 @@ class MainActivity : Activity() {
     private class Field(val key: String, val label: String, val hint: String, val def: String, val decimal: Boolean = false)
 
     private val huntFields = listOf(
+        Field("radius", "Yarıçap", "Random ile oyuncu boss'a bu kadar yaklaşınca yürüme başlar (piksel)", "150"),
+        Field("randomWait", "Random sonrası bekleme", "Işınlanma yüklenirken beklenecek süre (sn)", "2.5", true),
+        Field("randomMax", "Random deneme sınırı", "Bir boss için en fazla bu kadar Random; aşılırsa yürünür", "40"),
         Field("arrive", "Varış mesafesi", "İmleç boss ikonuna bu kadar yaklaşınca harita kapanır (piksel)", "45"),
         Field("walkTimeout", "Varış zaman aşımı", "Boss'a bu sürede varılamazsa yeni tarama (sn)", "60"),
         Field("fightTimeout", "Savaş zaman aşımı", "Bir boss için en fazla bekleme (sn)", "300"),
@@ -53,6 +56,7 @@ class MainActivity : Activity() {
     private val inputs = HashMap<String, EditText>()
     private lateinit var buffOn: Switch
     private lateinit var stopAuto: Switch
+    private lateinit var randomOn: Switch
     private lateinit var reviveOn: Switch
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
@@ -108,6 +112,12 @@ class MainActivity : Activity() {
 
         // av karti
         val hunt = card(col, "Av")
+        randomOn = Switch(this)
+        randomOn.text = "Random ile boss'a yaklaş (kapalıysa tamamen yürür)"
+        randomOn.setTextColor(Color.WHITE)
+        randomOn.textSize = 14f
+        randomOn.isChecked = prefs().getBoolean("cfg_randomOn", true)
+        hunt.addView(randomOn)
         for (f in huntFields) addField(hunt, f)
         stopAuto = Switch(this)
         stopAuto.text = "Boss ölünce oto saldırıyı kapat"
@@ -149,6 +159,7 @@ class MainActivity : Activity() {
             }
             e.putBoolean("cfg_buffOn", buffOn.isChecked)
             e.putBoolean("cfg_stopAuto", stopAuto.isChecked)
+            e.putBoolean("cfg_randomOn", randomOn.isChecked)
             e.putBoolean("cfg_reviveOn", reviveOn.isChecked)
             e.apply()
             Toast.makeText(this, "Kaydedildi", Toast.LENGTH_SHORT).show()
