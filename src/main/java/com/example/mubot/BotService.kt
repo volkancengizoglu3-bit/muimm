@@ -350,7 +350,7 @@ class BotService : AccessibilityService() {
     /** Ekran goruntusu al ve olum ekranindaysa canlan. */
     private fun look(): Bitmap? {
         val b = grab() ?: return null
-        if (isDeadScreen(b)) {
+        if (cfgB("reviveOn", false) && isDeadScreen(b)) {
             // tek bir kareye güvenme: biraz bekleyip tekrar bak
             pause(1200)
             val b2 = grab()
@@ -1153,7 +1153,7 @@ class BotService : AccessibilityService() {
                 val statOcr = lastOcr
                 val tt = if (open) readTitle(b) else Pair(null, null)
                 val rd = reviveDiff(b)
-                val dead = if (rd == null) "referans yok" else String.format("fark %.1f (eşik 14, %s)", rd, if (rd < 14f) "ÖLÜ SANIYOR" else "normal")
+                val dead = if (!cfgB("reviveOn", false)) "kapalı" else if (rd == null) "referans yok" else String.format("fark %.1f (eşik 14, %s)", rd, if (rd < 14f) "ÖLÜ SANIYOR" else "normal")
                 say(
                     "Harita açık: " + open + "  canlı boss: " + sc.bosses.size +
                         "  imleç: " + (sc.player != null) +

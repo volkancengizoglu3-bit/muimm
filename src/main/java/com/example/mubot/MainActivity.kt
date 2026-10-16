@@ -53,6 +53,7 @@ class MainActivity : Activity() {
     private val inputs = HashMap<String, EditText>()
     private lateinit var buffOn: Switch
     private lateinit var stopAuto: Switch
+    private lateinit var reviveOn: Switch
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
@@ -96,7 +97,7 @@ class MainActivity : Activity() {
             "4  Chat'te Raklion 1 ve Raklion 2 başlangıç koordinatlarını ve buff noktasını " +
             "aynı sekmede görünür tut.\n" +
             "5  Oyunda 'Ayar' ile kırmızı satırları işaretle (chat, chatTab, linkR1, linkR2, " +
-            "buffLink, miniTL, miniBR, revive).\n" +
+            "buffLink, miniTL, miniBR; revive sadece ölüm seçeneğini açarsan).\n" +
             "6  Haritayı aç, 'Test'e bas: canlı boss sayısı ve imleç görünmeli.\n" +
             "7  'Başlangıç' düğmesiyle şu an bulunduğun harita/kanalı seç, '▶ Başlat'.\n\n" +
             "Rota: Raklion 2 kanal 1-2-3, sonra Raklion 1 kanal 1-2-3, sonra baştan."
@@ -114,6 +115,15 @@ class MainActivity : Activity() {
         stopAuto.textSize = 13f
         stopAuto.isChecked = prefs().getBoolean("cfg_stopAuto", true)
         hunt.addView(stopAuto, lp(dp(10)))
+
+        // olum karti
+        val dead = card(col, "Ölüm")
+        reviveOn = Switch(this)
+        reviveOn.text = "Ölünce Free Revival'a bas"
+        reviveOn.setTextColor(Color.WHITE)
+        reviveOn.textSize = 14f
+        reviveOn.isChecked = prefs().getBoolean("cfg_reviveOn", false)
+        dead.addView(reviveOn)
 
         // respawn karti
         val resp = card(col, "Respawn sayaçları")
@@ -139,6 +149,7 @@ class MainActivity : Activity() {
             }
             e.putBoolean("cfg_buffOn", buffOn.isChecked)
             e.putBoolean("cfg_stopAuto", stopAuto.isChecked)
+            e.putBoolean("cfg_reviveOn", reviveOn.isChecked)
             e.apply()
             Toast.makeText(this, "Kaydedildi", Toast.LENGTH_SHORT).show()
         }
