@@ -28,4 +28,7 @@ android {
 dependencies {
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
+    // ATK / DEF sayilarini ve harita basligini okumak icin cihaz uzerinde calisan metin tanima (internet gerekmez)
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+    implementation("com.google.android.gms:play-services-tasks:18.2.0")
 }
